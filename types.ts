@@ -1,3 +1,4 @@
+
 export enum ResourceType {
   Madeira = 'Madeira',
   Vinho = 'Vinho',
@@ -22,6 +23,7 @@ export interface Shipment {
   shippedResources: ResourceAmount; // The amount already sent
   createdAt: number;
   status: 'Pendente' | 'Em Andamento' | 'Concluído';
+  notes?: string; // Optional description/list of buildings
 }
 
 export const INITIAL_RESOURCES: ResourceAmount = {

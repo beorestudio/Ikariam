@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Shipment, ResourceType, ResourceAmount } from '../types';
 import ResourceIcon from './ResourceIcon';
 import ShipmentRegistrationModal from './ShipmentRegistrationModal';
-import { ArrowRight, Trash2, Truck, Check, Send, Calendar, AlertTriangle } from 'lucide-react';
+import { ArrowRight, Trash2, Truck, Check, Send, Calendar, AlertTriangle, FileText } from 'lucide-react';
 
 interface ShipmentListProps {
   shipments: Shipment[];
@@ -101,15 +101,17 @@ const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onDelete, onRegi
                <div className="p-4 border-b border-stone-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                  
                  {/* Route Info */}
-                 <div className="flex flex-wrap items-center gap-2 text-stone-800">
-                    <div className="flex items-center font-medium">
-                      <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider mr-2">De</span>
-                      {shipment.sourceCity}
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-stone-400" />
-                    <div className="flex items-center font-medium">
-                      <span className="bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider mr-2">Para</span>
-                      {shipment.destinationCity}
+                 <div className="flex flex-col gap-1 w-full sm:w-auto">
+                    <div className="flex flex-wrap items-center gap-2 text-stone-800">
+                        <div className="flex items-center font-medium">
+                        <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider mr-2">De</span>
+                        {shipment.sourceCity}
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-stone-400" />
+                        <div className="flex items-center font-medium">
+                        <span className="bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider mr-2">Para</span>
+                        {shipment.destinationCity}
+                        </div>
                     </div>
                  </div>
 
@@ -149,6 +151,14 @@ const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onDelete, onRegi
                     </div>
                  </div>
                </div>
+
+               {/* Notes Section */}
+               {shipment.notes && (
+                   <div className="px-4 py-2 bg-yellow-50/50 border-b border-stone-100 flex items-start gap-2">
+                       <FileText className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                       <p className="text-xs text-stone-600 italic leading-relaxed whitespace-pre-wrap">{shipment.notes}</p>
+                   </div>
+               )}
 
                {/* Card Body - Resource Grid */}
                <div className="p-4 bg-stone-50/50">

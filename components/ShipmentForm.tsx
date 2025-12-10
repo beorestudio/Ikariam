@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { ResourceType, INITIAL_RESOURCES, ResourceAmount } from '../types';
-import { Plus, X, Truck, Building2, MapPin, Calculator, ChevronDown, ChevronUp, ClipboardPaste } from 'lucide-react';
+import { Plus, X, Truck, Building2, MapPin, Calculator, ChevronDown, ChevronUp, ClipboardPaste, FileText } from 'lucide-react';
 import ResourceIcon from './ResourceIcon';
 import { BUILDINGS_DB } from '../data/buildings';
 
 interface ShipmentFormProps {
-  onAddShipment: (source: string, destinations: string[], resources: ResourceAmount) => void;
+  onAddShipment: (source: string, destinations: string[], resources: ResourceAmount, notes?: string) => void;
   myCities: string[];
   onAddCity: (city: string) => void;
   initialData?: {
     destinations: string[];
     resources: ResourceAmount;
+    notes?: string;
   } | null;
 }
 
@@ -19,6 +20,7 @@ const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment, myCities, on
   const [tempDestination, setTempDestination] = useState('');
   const [destinationCities, setDestinationCities] = useState<string[]>([]);
   const [resources, setResources] = useState<ResourceAmount>(INITIAL_RESOURCES);
+  const [notes, setNotes] = useState('');
 
   // Calculator State
   const [showCalculator, setShowCalculator] = useState(false);
@@ -34,6 +36,8 @@ const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment, myCities, on
     if (initialData) {
       setDestinationCities(initialData.destinations);
       setResources(initialData.resources);
+      if (initialData.notes) setNotes(initialData.notes);
+      
       // Optional: scroll to form to make it obvious
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -137,11 +141,12 @@ const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment, myCities, on
         if (city.trim()) onAddCity(city.trim());
     });
 
-    onAddShipment(sourceCity, destinationCities, resources);
+    onAddShipment(sourceCity, destinationCities, resources, notes);
 
     setDestinationCities([]);
     setResources(INITIAL_RESOURCES);
     setTempDestination('');
+    setNotes('');
   };
 
   const selectedBuilding = BUILDINGS_DB.find(b => b.id === selectedBuildingId);
@@ -255,6 +260,25 @@ const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment, myCities, on
                 </div>
               </div>
             </div>
+
+            {/* Notes Field */}
+            <div>
+              <label className="block text-sm font-medium text-stone-600 mb-1">
+                Notas / Detalhes da Encomenda
+              </label>
+              <div className="relative">
+                <div className="absolute top-3 left-3 flex items-start pointer-events-none">
+                  <FileText className="h-4 w-4 text-stone-400" />
+                </div>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Ex: Upgrade Câmara Municipal Lv 5, 6 e 7..."
+                  className="pl-10 block w-full rounded-md border-stone-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 sm:text-sm p-3 border bg-stone-50 h-24 resize-none"
+                />
+              </div>
+            </div>
+
           </div>
 
           {/* RIGHT COLUMN: Resources & Calculator */}

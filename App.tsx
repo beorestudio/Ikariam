@@ -27,6 +27,7 @@ const AuthenticatedApp: React.FC = () => {
   const [shipmentPrefill, setShipmentPrefill] = useState<{
     destinations: string[];
     resources: ResourceAmount;
+    notes?: string;
   } | null>(null);
 
   // --- Shipments State ---
@@ -118,7 +119,7 @@ const AuthenticatedApp: React.FC = () => {
     setMyCities(prev => prev.filter(c => c !== city));
   };
 
-  const handleAddShipment = (source: string, destinations: string[], resources: ResourceAmount) => {
+  const handleAddShipment = (source: string, destinations: string[], resources: ResourceAmount, notes?: string) => {
     const newShipments: Shipment[] = destinations.map((dest) => ({
       id: crypto.randomUUID(),
       sourceCity: source,
@@ -127,6 +128,7 @@ const AuthenticatedApp: React.FC = () => {
       shippedResources: { ...INITIAL_RESOURCES },
       createdAt: Date.now(),
       status: 'Pendente',
+      notes: notes,
     }));
     setShipments((prev) => [...newShipments, ...prev]);
   };
@@ -177,10 +179,11 @@ const AuthenticatedApp: React.FC = () => {
   };
 
   // Handle Create Shipment Request from Empire Manager
-  const handleCreateShipmentRequest = (destination: string, missingResources: ResourceAmount) => {
+  const handleCreateShipmentRequest = (destination: string, missingResources: ResourceAmount, description?: string) => {
     setShipmentPrefill({
       destinations: [destination],
-      resources: missingResources
+      resources: missingResources,
+      notes: description
     });
     setCurrentTab('logistics');
   };
