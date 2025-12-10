@@ -1,0 +1,47 @@
+export enum ResourceType {
+  Madeira = 'Madeira',
+  Vinho = 'Vinho',
+  Marmore = 'Mármore',
+  Cristal = 'Cristal',
+  Enxofre = 'Enxofre',
+}
+
+export interface ResourceAmount {
+  [ResourceType.Madeira]: number;
+  [ResourceType.Vinho]: number;
+  [ResourceType.Marmore]: number;
+  [ResourceType.Cristal]: number;
+  [ResourceType.Enxofre]: number;
+}
+
+export interface Shipment {
+  id: string;
+  sourceCity: string;
+  destinationCity: string;
+  resources: ResourceAmount; // The total requested amount
+  shippedResources: ResourceAmount; // The amount already sent
+  createdAt: number;
+  status: 'Pendente' | 'Em Andamento' | 'Concluído';
+}
+
+export const INITIAL_RESOURCES: ResourceAmount = {
+  [ResourceType.Madeira]: 0,
+  [ResourceType.Vinho]: 0,
+  [ResourceType.Marmore]: 0,
+  [ResourceType.Cristal]: 0,
+  [ResourceType.Enxofre]: 0,
+};
+
+// --- Database Structures ---
+
+export interface BuildingCost {
+  level: number;
+  resources: ResourceAmount;
+}
+
+export interface Building {
+  id: string;
+  name: string;
+  description?: string;
+  costs: BuildingCost[]; // Array of costs per level
+}
