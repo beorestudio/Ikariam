@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ResourceType, INITIAL_RESOURCES, ResourceAmount } from '../types';
 import { Plus, X, Truck, Building2, MapPin, Calculator, ChevronDown, ChevronUp, ClipboardPaste } from 'lucide-react';
 import ResourceIcon from './ResourceIcon';
@@ -8,9 +8,13 @@ interface ShipmentFormProps {
   onAddShipment: (source: string, destinations: string[], resources: ResourceAmount) => void;
   myCities: string[];
   onAddCity: (city: string) => void;
+  initialData?: {
+    destinations: string[];
+    resources: ResourceAmount;
+  } | null;
 }
 
-const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment, myCities, onAddCity }) => {
+const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment, myCities, onAddCity, initialData }) => {
   const [sourceCity, setSourceCity] = useState('');
   const [tempDestination, setTempDestination] = useState('');
   const [destinationCities, setDestinationCities] = useState<string[]>([]);
@@ -24,6 +28,16 @@ const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment, myCities, on
   // Import Modal State
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
+
+  // Effect to handle pre-fill data from Empire Manager
+  useEffect(() => {
+    if (initialData) {
+      setDestinationCities(initialData.destinations);
+      setResources(initialData.resources);
+      // Optional: scroll to form to make it obvious
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [initialData]);
 
   const handleAddDestination = () => {
     if (tempDestination.trim()) {

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { EmpireCity, ResourceType } from '../../types';
+import { EmpireCity, ResourceType, ResourceAmount, INITIAL_RESOURCES } from '../../types';
 import ResourceIcon from '../ResourceIcon';
-import { Building2, Info, ArrowUpCircle, PlayCircle, Trash2, ArrowUp, Calculator, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Building2, Info, ArrowUpCircle, PlayCircle, Trash2, ArrowUp, Calculator, CheckCircle2, AlertTriangle, Truck } from 'lucide-react';
 import { BUILDINGS_DB } from '../../data/buildings';
 
 interface EmpireManagerProps {
@@ -9,9 +9,10 @@ interface EmpireManagerProps {
   onOpenScriptModal: () => void;
   onSimulateData?: () => void;
   onClearData?: () => void;
+  onCreateShipment?: (destination: string, missingResources: ResourceAmount) => void;
 }
 
-const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal, onSimulateData, onClearData }) => {
+const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal, onSimulateData, onClearData, onCreateShipment }) => {
   const [activeTab, setActiveTab] = useState<'resources' | 'buildings' | 'calculator'>('resources');
 
   if (cities.length === 0) {
@@ -119,7 +120,7 @@ const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal
            </div>
         )}
         {activeTab === 'calculator' && (
-           <UpgradeCalculator cities={cities} />
+           <UpgradeCalculator cities={cities} onCreateShipment={onCreateShipment} />
         )}
       </div>
       
@@ -337,7 +338,10 @@ const BuildingsTable: React.FC<{ cities: EmpireCity[] }> = ({ cities }) => {
 };
 
 // Upgrade Calculator Component
-const UpgradeCalculator: React.FC<{ cities: EmpireCity[] }> = ({ cities }) => {
+const UpgradeCalculator: React.FC<{ 
+  cities: EmpireCity[],
+  onCreateShipment?: (destination: string, missingResources: ResourceAmount) => void 
+}> = ({ cities, onCreateShipment }) => {
   const [selectedCityId, setSelectedCityId] = useState<number | ''>(cities[0]?.id || '');
   const [selectedBuildingId, setSelectedBuildingId] = useState<string>('town_hall');
   const [userSelectedLevel, setUserSelectedLevel] = useState<number | ''>('');
@@ -353,6 +357,24 @@ const UpgradeCalculator: React.FC<{ cities: EmpireCity[] }> = ({ cities }) => {
   const targetLevel = userSelectedLevel !== '' ? Number(userSelectedLevel) : (currentLevel + 1);
   
   const costData = selectedBuilding?.costs.find(c => c.level === targetLevel);
+
+  // Logic to calculate missing resources for shipment button
+  const missingResources: ResourceAmount = { ...INITIAL_RESOURCES };
+  let hasMissingResources = false;
+
+  if (selectedCity && costData) {
+      Object.entries(costData.resources).forEach(([resType, amount]) => {
+          if ((amount as number) > 0) {
+              const type = resType as ResourceType;
+              const currentAmount = selectedCity.resources[type]?.currentAmount || 0;
+              const missing = Math.max(0, (amount as number) - currentAmount);
+              if (missing > 0) {
+                  missingResources[type] = missing;
+                  hasMissingResources = true;
+              }
+          }
+      });
+  }
 
   return (
     <div className="p-6">
@@ -409,8 +431,20 @@ const UpgradeCalculator: React.FC<{ cities: EmpireCity[] }> = ({ cities }) => {
         </div>
 
         {selectedCity && costData ? (
-            <div className="space-y-4">
-               <h4 className="font-medium text-stone-700">Análise de Recursos: {selectedBuilding?.name} (Nível {targetLevel})</h4>
+            <div className="space-y-6">
+               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                 <h4 className="font-medium text-stone-700">Análise de Recursos: {selectedBuilding?.name} (Nível {targetLevel})</h4>
+                 
+                 {hasMissingResources && onCreateShipment && (
+                    <button
+                        onClick={() => onCreateShipment(selectedCity.name, missingResources)}
+                        className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm flex items-center gap-2"
+                    >
+                        <Truck className="w-4 h-4" />
+                        Criar Encomenda de Logística
+                    </button>
+                 )}
+               </div>
                
                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {Object.entries(costData.resources).map(([resType, amount]) => {

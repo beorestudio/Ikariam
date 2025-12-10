@@ -23,6 +23,12 @@ const AuthenticatedApp: React.FC = () => {
   // --- Navigation State ---
   const [currentTab, setCurrentTab] = useState<'logistics' | 'empire'>('logistics');
 
+  // --- Shipment Prefill State (For automatic creation from Empire Manager) ---
+  const [shipmentPrefill, setShipmentPrefill] = useState<{
+    destinations: string[];
+    resources: ResourceAmount;
+  } | null>(null);
+
   // --- Shipments State ---
   const [shipments, setShipments] = useState<Shipment[]>(() => {
     try {
@@ -170,6 +176,15 @@ const AuthenticatedApp: React.FC = () => {
     }
   };
 
+  // Handle Create Shipment Request from Empire Manager
+  const handleCreateShipmentRequest = (destination: string, missingResources: ResourceAmount) => {
+    setShipmentPrefill({
+      destinations: [destination],
+      resources: missingResources
+    });
+    setCurrentTab('logistics');
+  };
+
   return (
     <div className="min-h-screen text-stone-800 pb-12 bg-[#fdfaf6]">
       {/* Header */}
@@ -252,6 +267,7 @@ const AuthenticatedApp: React.FC = () => {
                 onAddShipment={handleAddShipment} 
                 myCities={myCities}
                 onAddCity={handleAddCity}
+                initialData={shipmentPrefill}
               />
             </section>
 
@@ -285,6 +301,7 @@ const AuthenticatedApp: React.FC = () => {
             onOpenScriptModal={() => setIsScriptModalOpen(true)}
             onSimulateData={handleSimulateData}
             onClearData={handleClearEmpireData}
+            onCreateShipment={handleCreateShipmentRequest}
           />
         )}
       </main>
