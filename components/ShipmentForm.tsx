@@ -6,9 +6,10 @@ import { BUILDINGS_DB } from '../data/buildings';
 
 interface ShipmentFormProps {
   onAddShipment: (source: string, destinations: string[], resources: ResourceAmount) => void;
+  myCities: string[];
 }
 
-const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment }) => {
+const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment, myCities }) => {
   const [sourceCity, setSourceCity] = useState('');
   const [tempDestination, setTempDestination] = useState('');
   const [destinationCities, setDestinationCities] = useState<string[]>([]);
@@ -126,6 +127,13 @@ const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment }) => {
 
   return (
     <div className="bg-white rounded-xl shadow-lg border border-stone-200 overflow-hidden">
+      {/* Datalist for autocomplete */}
+      <datalist id="my-cities-list">
+        {myCities.map((city) => (
+          <option key={city} value={city} />
+        ))}
+      </datalist>
+
       <div className="bg-gradient-to-r from-amber-700 to-amber-800 px-6 py-4 border-b border-amber-900/10 flex items-center justify-between text-white">
         <h2 className="font-semibold text-xl flex items-center gap-2">
           <Truck className="w-6 h-6" /> Nova Encomenda
@@ -162,10 +170,12 @@ const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment }) => {
                 <input
                   type="text"
                   required
+                  list="my-cities-list"
                   value={sourceCity}
                   onChange={(e) => setSourceCity(e.target.value)}
                   placeholder="Ex: Pólis Alpha"
                   className="pl-10 block w-full rounded-md border-stone-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 sm:text-sm p-3 border bg-stone-50"
+                  autoComplete="off"
                 />
               </div>
             </div>
@@ -182,11 +192,13 @@ const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment }) => {
                   </div>
                   <input
                     type="text"
+                    list="my-cities-list"
                     value={tempDestination}
                     onChange={(e) => setTempDestination(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddDestination())}
                     placeholder="Digite e pressione Enter (Ex: Pólis Beta)"
                     className="pl-10 block w-full rounded-md border-stone-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 sm:text-sm p-3 border bg-stone-50"
+                    autoComplete="off"
                   />
                 </div>
                 <button

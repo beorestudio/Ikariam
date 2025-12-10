@@ -32,6 +32,15 @@ export const INITIAL_RESOURCES: ResourceAmount = {
   [ResourceType.Enxofre]: 0,
 };
 
+// --- User / Auth Structures ---
+
+export interface User {
+  id: string;
+  username: string;
+  email?: string;
+  createdAt: number;
+}
+
 // --- Database Structures ---
 
 export interface BuildingCost {
