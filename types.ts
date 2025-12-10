@@ -54,3 +54,33 @@ export interface Building {
   description?: string;
   costs: BuildingCost[]; // Array of costs per level
 }
+
+// --- Empire Manager Structures ---
+
+export interface EmpireBuilding {
+  buildingId: string;
+  level: number;
+  name: string;
+  position?: number;
+}
+
+export interface CityProduction {
+  resourceType: ResourceType;
+  production: number; // per hour
+  maxCapacity: number;
+  currentAmount: number;
+  isFull: boolean;
+}
+
+export interface EmpireCity {
+  id: number; // Ikariam City ID
+  name: string;
+  coords: string; // "[x:y]"
+  islandId: number;
+  resources: {
+    [key in ResourceType]?: CityProduction;
+  };
+  buildings: EmpireBuilding[];
+  researchPoints?: number;
+  updatedAt: number;
+}
