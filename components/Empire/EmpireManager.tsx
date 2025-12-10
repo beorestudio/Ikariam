@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { EmpireCity, ResourceType, ResourceAmount, INITIAL_RESOURCES, BuildingCost, Shipment } from '../../types';
 import ResourceIcon from '../ResourceIcon';
-import { Building2, Info, ArrowUpCircle, PlayCircle, Trash2, ArrowUp, Calculator, CheckCircle2, AlertTriangle, Truck, Plus, X, Hammer, Clock } from 'lucide-react';
+import { Building2, Info, ArrowUpCircle, PlayCircle, Trash2, ArrowUp, Calculator, CheckCircle2, AlertTriangle, Truck, Plus, X, Hammer, Clock, FileText } from 'lucide-react';
 import { BUILDINGS_DB } from '../../data/buildings';
 
 interface EmpireManagerProps {
@@ -141,13 +141,47 @@ const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, shipments = [], o
 
 // --- NEW COMPONENT: CONSTRUCTION READINESS PANEL ---
 const ConstructionReadinessPanel: React.FC<{ cities: EmpireCity[], shipments: Shipment[] }> = ({ cities, shipments }) => {
+  
+  // Helper to parse notes and calculate TRUE total cost of construction
+  const calculateTrueCostFromNotes = (notes: string): ResourceAmount | null => {
+    if (!notes) return null;
+    const lines = notes.split('\n');
+    const totalCost = { ...INITIAL_RESOURCES };
+    let foundAny = false;
+
+    lines.forEach(line => {
+        // Match "1. Name Nível X" (case insensitive, allows "Nível" or "Level")
+        const match = line.match(/^\d+\.\s+(.*?)\s+(?:Nível|Level)\s+(\d+)/i);
+        if (match) {
+            const name = match[1].trim();
+            const level = parseInt(match[2]);
+            const building = BUILDINGS_DB.find(b => b.name.toLowerCase() === name.toLowerCase());
+            
+            if (building) {
+                const cost = building.costs.find(c => c.level === level);
+                if (cost) {
+                    foundAny = true;
+                    Object.entries(cost.resources).forEach(([res, amount]) => {
+                        totalCost[res as ResourceType] = (totalCost[res as ResourceType] || 0) + (amount as number);
+                    });
+                }
+            }
+        }
+    });
+
+    return foundAny ? totalCost : null;
+  };
+
   // Filter active shipments that have notes (implying a construction goal)
   // and match them with existing cities in the empire data
   const trackedGoals = shipments
-    .filter(s => s.status !== 'Concluído')
+    .filter(s => s.status !== 'Concluído' && s.notes)
     .map(shipment => {
       const city = cities.find(c => c.name === shipment.destinationCity);
-      return { shipment, city };
+      // Try to calculate true cost based on the description (notes)
+      const trueCost = calculateTrueCostFromNotes(shipment.notes || '');
+      
+      return { shipment, city, trueCost };
     })
     // Only show if we found the city in our empire data
     .filter(item => item.city !== undefined);
@@ -162,15 +196,19 @@ const ConstructionReadinessPanel: React.FC<{ cities: EmpireCity[], shipments: Sh
       </h3>
       
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {trackedGoals.map(({ shipment, city }) => {
+        {trackedGoals.map(({ shipment, city, trueCost }) => {
           if (!city) return null; // TS Check
+
+          // Use True Cost if available (parsed from notes), otherwise fallback to shipment delta (less accurate for "construction status")
+          const targetResources = trueCost || shipment.resources;
+          const isTrueCost = !!trueCost;
 
           // Calculate readiness
           let allReady = true;
           let totalProgress = 0;
           let resourceCount = 0;
 
-          const analysis = Object.entries(shipment.resources)
+          const analysis = Object.entries(targetResources)
             .filter(([_, amount]) => (amount as number) > 0)
             .map(([res, targetAmount]) => {
               const type = res as ResourceType;
@@ -240,6 +278,14 @@ const ConstructionReadinessPanel: React.FC<{ cities: EmpireCity[], shipments: Sh
                     </div>
                   </div>
                 ))}
+              </div>
+
+              {/* Info about cost source */}
+              <div className="mt-3 pt-2 border-t border-stone-100 text-[10px] text-stone-400 flex items-center justify-between">
+                 <span>
+                    {isTrueCost ? 'Baseado no custo total dos edifícios' : 'Baseado na quantidade da encomenda'}
+                 </span>
+                 {isTrueCost && <FileText className="w-3 h-3 text-stone-300" />}
               </div>
 
               {/* Background Status Bar */}

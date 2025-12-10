@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Shipment, ResourceType, ResourceAmount } from '../types';
 import ResourceIcon from './ResourceIcon';
 import ShipmentRegistrationModal from './ShipmentRegistrationModal';
-import { ArrowRight, Trash2, Truck, Check, Send, Calendar, AlertTriangle, FileText } from 'lucide-react';
+import { ArrowRight, Trash2, Truck, Check, Send, Calendar, AlertTriangle, FileText, ChevronDown, ChevronUp, PackageCheck } from 'lucide-react';
 
 interface ShipmentListProps {
   shipments: Shipment[];
@@ -13,6 +13,19 @@ interface ShipmentListProps {
 const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onDelete, onRegisterShipment }) => {
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
   const [shipmentToDelete, setShipmentToDelete] = useState<Shipment | null>(null);
+  
+  // State to track expanded shipment IDs
+  const [expandedShipments, setExpandedShipments] = useState<Set<string>>(new Set());
+
+  const toggleExpand = (id: string) => {
+    const newSet = new Set(expandedShipments);
+    if (newSet.has(id)) {
+      newSet.delete(id);
+    } else {
+      newSet.add(id);
+    }
+    setExpandedShipments(newSet);
+  };
 
   const handleDeleteClick = (shipment: Shipment) => {
     setShipmentToDelete(shipment);
@@ -87,11 +100,12 @@ const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onDelete, onRegi
 
         {shipments.map((shipment) => {
            const activeResources = Object.entries(shipment.resources).filter(([_, val]) => (val as number) > 0);
+           const isExpanded = expandedShipments.has(shipment.id);
            
            return (
              <div 
                key={shipment.id} 
-               className={`bg-white rounded-lg shadow-sm border border-stone-200 overflow-hidden transition-shadow hover:shadow-md
+               className={`bg-white rounded-lg shadow-sm border border-stone-200 overflow-hidden transition-all hover:shadow-md
                  ${shipment.status === 'Concluído' ? 'border-l-4 border-l-green-500' : 
                    shipment.status === 'Em Andamento' ? 'border-l-4 border-l-blue-500' : 
                    'border-l-4 border-l-amber-400'}
@@ -142,6 +156,13 @@ const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onDelete, onRegi
                           </button>
                         )}
                         <button
+                          onClick={() => toggleExpand(shipment.id)}
+                          className={`p-1.5 rounded-md transition-colors ${isExpanded ? 'bg-stone-100 text-stone-600' : 'text-stone-400 hover:bg-stone-50 hover:text-stone-600'}`}
+                          title={isExpanded ? "Recolher detalhes" : "Ver detalhes"}
+                        >
+                          {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </button>
+                        <button
                           onClick={() => handleDeleteClick(shipment)}
                           className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
                           title="Excluir"
@@ -160,7 +181,7 @@ const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onDelete, onRegi
                    </div>
                )}
 
-               {/* Card Body - Resource Grid */}
+               {/* Card Body - Resource Grid (Summary) */}
                <div className="p-4 bg-stone-50/50">
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                      {activeResources.map(([key, total]) => {
@@ -169,8 +190,7 @@ const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onDelete, onRegi
                         const percentage = Math.min(100, (shipped / (total as number)) * 100);
                         const isComplete = remaining <= 0;
                         const barColor = getProgressColor(key, isComplete);
-                        const textColor = getTextColor(key, isComplete);
-
+                        
                         return (
                           <div key={key} className="bg-white p-3 rounded border border-stone-100 shadow-sm">
                             <div className="flex justify-between items-center mb-2">
@@ -207,6 +227,89 @@ const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onDelete, onRegi
                      })}
                   </div>
                </div>
+
+               {/* Expanded Details Table */}
+               {isExpanded && (
+                 <div className="border-t border-stone-200 bg-white p-4">
+                    <h4 className="text-xs font-bold text-stone-500 uppercase tracking-wide mb-3 flex items-center gap-2">
+                      <PackageCheck className="w-4 h-4" />
+                      Detalhamento da Carga
+                    </h4>
+                    <div className="overflow-x-auto rounded-lg border border-stone-200">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-stone-50 text-stone-500">
+                          <tr>
+                            <th className="px-4 py-2 text-left font-medium text-xs uppercase">Recurso</th>
+                            <th className="px-4 py-2 text-right font-medium text-xs uppercase">Solicitado (Total)</th>
+                            <th className="px-4 py-2 text-right font-medium text-xs uppercase">Enviado (Real)</th>
+                            <th className="px-4 py-2 text-right font-medium text-xs uppercase">Restante</th>
+                            <th className="px-4 py-2 text-center font-medium text-xs uppercase">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-stone-100 bg-white">
+                          {activeResources.map(([key, total]) => {
+                            const shipped = shipment.shippedResources[key as ResourceType] || 0;
+                            const remaining = Math.max(0, (total as number) - shipped);
+                            const isComplete = remaining === 0;
+
+                            return (
+                              <tr key={key} className="hover:bg-stone-50/50">
+                                <td className="px-4 py-2">
+                                  <div className="flex items-center gap-2">
+                                    <ResourceIcon type={key as ResourceType} className="w-4 h-4" />
+                                    <span className="font-medium text-stone-700">{key}</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-2 text-right font-mono text-stone-600">
+                                  {(total as number).toLocaleString()}
+                                </td>
+                                <td className="px-4 py-2 text-right font-mono text-stone-600">
+                                  {shipped.toLocaleString()}
+                                </td>
+                                <td className="px-4 py-2 text-right font-mono">
+                                  {isComplete ? (
+                                    <span className="text-stone-300">-</span>
+                                  ) : (
+                                    <span className="text-red-500 font-medium">-{remaining.toLocaleString()}</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2 text-center">
+                                  {isComplete ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800">
+                                      Concluído
+                                    </span>
+                                  ) : shipped > 0 ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-800">
+                                      Parcial
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-stone-100 text-stone-600">
+                                      Pendente
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {/* Totals Row */}
+                          <tr className="bg-stone-50 font-semibold text-stone-800">
+                            <td className="px-4 py-2">Total</td>
+                            <td className="px-4 py-2 text-right font-mono">
+                              {activeResources.reduce((acc, [, val]) => acc + (val as number), 0).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-2 text-right font-mono">
+                               {activeResources.reduce((acc, [key]) => acc + (shipment.shippedResources[key as ResourceType] || 0), 0).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-2 text-right font-mono text-red-600">
+                               {activeResources.reduce((acc, [key, val]) => acc + Math.max(0, (val as number) - (shipment.shippedResources[key as ResourceType] || 0)), 0).toLocaleString()}
+                            </td>
+                            <td></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                 </div>
+               )}
              </div>
            );
         })}
