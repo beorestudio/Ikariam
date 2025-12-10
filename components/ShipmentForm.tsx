@@ -7,9 +7,10 @@ import { BUILDINGS_DB } from '../data/buildings';
 interface ShipmentFormProps {
   onAddShipment: (source: string, destinations: string[], resources: ResourceAmount) => void;
   myCities: string[];
+  onAddCity: (city: string) => void;
 }
 
-const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment, myCities }) => {
+const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment, myCities, onAddCity }) => {
   const [sourceCity, setSourceCity] = useState('');
   const [tempDestination, setTempDestination] = useState('');
   const [destinationCities, setDestinationCities] = useState<string[]>([]);
@@ -115,6 +116,12 @@ const ShipmentForm: React.FC<ShipmentFormProps> = ({ onAddShipment, myCities }) 
     // Check if at least one resource is > 0
     const hasResources = Object.values(resources).some((val) => (val as number) > 0);
     if (!hasResources) return;
+
+    // Save used cities to "My Cities" list for autocomplete
+    if (sourceCity.trim()) onAddCity(sourceCity.trim());
+    destinationCities.forEach(city => {
+        if (city.trim()) onAddCity(city.trim());
+    });
 
     onAddShipment(sourceCity, destinationCities, resources);
 

@@ -251,6 +251,7 @@ const AuthenticatedApp: React.FC = () => {
               <ShipmentForm 
                 onAddShipment={handleAddShipment} 
                 myCities={myCities}
+                onAddCity={handleAddCity}
               />
             </section>
 

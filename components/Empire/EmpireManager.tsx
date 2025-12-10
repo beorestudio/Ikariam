@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { EmpireCity, ResourceType } from '../../types';
 import ResourceIcon from '../ResourceIcon';
-import { Building2, Info, ArrowUpCircle, PlayCircle, Trash2, ArrowUp } from 'lucide-react';
+import { Building2, Info, ArrowUpCircle, PlayCircle, Trash2, ArrowUp, Calculator, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { BUILDINGS_DB } from '../../data/buildings';
 
 interface EmpireManagerProps {
@@ -12,7 +12,7 @@ interface EmpireManagerProps {
 }
 
 const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal, onSimulateData, onClearData }) => {
-  const [activeTab, setActiveTab] = useState<'resources' | 'buildings'>('resources');
+  const [activeTab, setActiveTab] = useState<'resources' | 'buildings' | 'calculator'>('resources');
 
   if (cities.length === 0) {
     return (
@@ -50,11 +50,11 @@ const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal
   return (
     <div className="space-y-6">
       {/* Sub-navigation */}
-      <div className="flex justify-between items-center">
-        <div className="bg-white rounded-lg shadow-sm border border-stone-200 p-1 flex gap-1">
+      <div className="flex justify-between items-center flex-wrap gap-2">
+        <div className="bg-white rounded-lg shadow-sm border border-stone-200 p-1 flex gap-1 overflow-x-auto max-w-full">
           <button
             onClick={() => setActiveTab('resources')}
-            className={`py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+            className={`py-2 px-4 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
               activeTab === 'resources' 
                 ? 'bg-amber-100 text-amber-900 shadow-sm' 
                 : 'text-stone-600 hover:bg-stone-50'
@@ -64,13 +64,24 @@ const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal
           </button>
           <button
             onClick={() => setActiveTab('buildings')}
-            className={`py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+            className={`py-2 px-4 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
               activeTab === 'buildings' 
                 ? 'bg-amber-100 text-amber-900 shadow-sm' 
                 : 'text-stone-600 hover:bg-stone-50'
             }`}
           >
             Edifícios
+          </button>
+          <button
+            onClick={() => setActiveTab('calculator')}
+            className={`py-2 px-4 rounded-md text-sm font-medium transition-colors whitespace-nowrap flex items-center gap-1 ${
+              activeTab === 'calculator' 
+                ? 'bg-amber-100 text-amber-900 shadow-sm' 
+                : 'text-stone-600 hover:bg-stone-50'
+            }`}
+          >
+            <Calculator className="w-4 h-4" />
+            Calculadora de Upgrade
           </button>
         </div>
         
@@ -97,13 +108,19 @@ const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          {activeTab === 'resources' ? (
-            <ResourceTable cities={cities} />
-          ) : (
-            <BuildingsTable cities={cities} />
-          )}
-        </div>
+        {activeTab === 'resources' && (
+           <div className="overflow-x-auto">
+             <ResourceTable cities={cities} />
+           </div>
+        )}
+        {activeTab === 'buildings' && (
+           <div className="overflow-x-auto">
+             <BuildingsTable cities={cities} />
+           </div>
+        )}
+        {activeTab === 'calculator' && (
+           <UpgradeCalculator cities={cities} />
+        )}
       </div>
       
       <div className="text-center text-xs text-stone-400 mt-4">
@@ -318,5 +335,148 @@ const BuildingsTable: React.FC<{ cities: EmpireCity[] }> = ({ cities }) => {
     </table>
   );
 };
+
+// Upgrade Calculator Component
+const UpgradeCalculator: React.FC<{ cities: EmpireCity[] }> = ({ cities }) => {
+  const [selectedCityId, setSelectedCityId] = useState<number | ''>(cities[0]?.id || '');
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string>('town_hall');
+  const [userSelectedLevel, setUserSelectedLevel] = useState<number | ''>('');
+
+  const selectedCity = cities.find(c => c.id === Number(selectedCityId));
+  const selectedBuilding = BUILDINGS_DB.find(b => b.id === selectedBuildingId);
+  
+  // Find current level of building in the city
+  const currentBuildingInstance = selectedCity?.buildings.find(b => b.buildingId === selectedBuildingId);
+  const currentLevel = currentBuildingInstance ? currentBuildingInstance.level : 0;
+  
+  // Default target is current + 1, unless user overrides
+  const targetLevel = userSelectedLevel !== '' ? Number(userSelectedLevel) : (currentLevel + 1);
+  
+  const costData = selectedBuilding?.costs.find(c => c.level === targetLevel);
+
+  return (
+    <div className="p-6">
+        <div className="bg-amber-50 rounded-lg p-6 border border-amber-200 mb-6">
+            <h3 className="text-lg font-semibold text-amber-900 mb-4 flex items-center gap-2">
+                <Calculator className="w-5 h-5" /> Configurar Objetivo
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                    <label className="block text-sm font-medium text-amber-800 mb-1">Selecione a Cidade</label>
+                    <select
+                        className="block w-full rounded-md border-amber-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 bg-white p-2"
+                        value={selectedCityId}
+                        onChange={(e) => setSelectedCityId(Number(e.target.value))}
+                    >
+                        {cities.map(c => (
+                            <option key={c.id} value={c.id}>{c.name} {c.coords}</option>
+                        ))}
+                    </select>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-amber-800 mb-1">Edifício</label>
+                    <select
+                        className="block w-full rounded-md border-amber-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 bg-white p-2"
+                        value={selectedBuildingId}
+                        onChange={(e) => {
+                            setSelectedBuildingId(e.target.value);
+                            setUserSelectedLevel(''); // Reset manual level when building changes
+                        }}
+                    >
+                        {BUILDINGS_DB.map(b => (
+                            <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                    </select>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-amber-800 mb-1">
+                        Nível Alvo {currentLevel > 0 && <span className="text-xs font-normal text-amber-600">(Atual: {currentLevel})</span>}
+                    </label>
+                    <select
+                        className="block w-full rounded-md border-amber-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 bg-white p-2"
+                        value={targetLevel}
+                        onChange={(e) => setUserSelectedLevel(Number(e.target.value))}
+                    >
+                        {selectedBuilding?.costs.map(c => (
+                            <option key={c.level} value={c.level}>Nível {c.level}</option>
+                        ))}
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        {selectedCity && costData ? (
+            <div className="space-y-4">
+               <h4 className="font-medium text-stone-700">Análise de Recursos: {selectedBuilding?.name} (Nível {targetLevel})</h4>
+               
+               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {Object.entries(costData.resources).map(([resType, amount]) => {
+                      if ((amount as number) <= 0) return null;
+                      
+                      const type = resType as ResourceType;
+                      const currentAmount = selectedCity.resources[type]?.currentAmount || 0;
+                      const required = amount as number;
+                      const missing = Math.max(0, required - currentAmount);
+                      const percent = Math.min(100, (currentAmount / required) * 100);
+                      const isReady = currentAmount >= required;
+
+                      return (
+                          <div key={type} className={`p-4 rounded-lg border ${isReady ? 'bg-green-50 border-green-200' : 'bg-white border-stone-200 shadow-sm'}`}>
+                             <div className="flex justify-between items-start mb-3">
+                                 <div className="flex items-center gap-2">
+                                     <ResourceIcon type={type} className="w-5 h-5" />
+                                     <span className="font-semibold text-stone-700">{type}</span>
+                                 </div>
+                                 {isReady ? (
+                                     <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full flex items-center gap-1 font-bold">
+                                         <CheckCircle2 className="w-3 h-3" /> OK
+                                     </span>
+                                 ) : (
+                                     <span className="bg-amber-100 text-amber-700 text-xs px-2 py-1 rounded-full flex items-center gap-1 font-bold">
+                                         <AlertTriangle className="w-3 h-3" /> Falta
+                                     </span>
+                                 )}
+                             </div>
+
+                             <div className="space-y-1 mb-3">
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-stone-500">Tenho:</span>
+                                    <span className="font-mono font-medium text-stone-800">{currentAmount.toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-stone-500">Preciso:</span>
+                                    <span className="font-mono font-medium text-stone-800">{required.toLocaleString()}</span>
+                                </div>
+                                {!isReady && (
+                                     <div className="flex justify-between text-sm border-t border-dashed border-stone-200 pt-1 mt-1">
+                                        <span className="text-red-500 font-medium">Faltam:</span>
+                                        <span className="font-mono font-bold text-red-600">-{missing.toLocaleString()}</span>
+                                    </div>
+                                )}
+                             </div>
+
+                             <div className="w-full bg-stone-200 rounded-full h-2">
+                                 <div 
+                                     className={`h-2 rounded-full transition-all duration-500 ${isReady ? 'bg-green-500' : 'bg-amber-500'}`} 
+                                     style={{ width: `${percent}%` }}
+                                 />
+                             </div>
+                             <div className="text-right text-xs text-stone-400 mt-1">{percent.toFixed(1)}%</div>
+                          </div>
+                      );
+                  })}
+               </div>
+            </div>
+        ) : (
+            <div className="text-center py-12 bg-stone-50 rounded-lg border border-stone-200 border-dashed text-stone-400">
+                Selecione uma cidade e um nível válido para ver o cálculo.
+            </div>
+        )}
+    </div>
+  );
+}
 
 export default EmpireManager;
