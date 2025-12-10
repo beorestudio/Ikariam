@@ -162,6 +162,14 @@ const AuthenticatedApp: React.FC = () => {
     });
   };
 
+  // Clear Empire Data Handler
+  const handleClearEmpireData = () => {
+    if (confirm('Tem certeza que deseja limpar todos os dados do império? Isso removerá as cidades importadas.')) {
+        setEmpireData([]);
+        localStorage.removeItem(EMPIRE_KEY);
+    }
+  };
+
   return (
     <div className="min-h-screen text-stone-800 pb-12 bg-[#fdfaf6]">
       {/* Header */}
@@ -275,6 +283,7 @@ const AuthenticatedApp: React.FC = () => {
             cities={empireData} 
             onOpenScriptModal={() => setIsScriptModalOpen(true)}
             onSimulateData={handleSimulateData}
+            onClearData={handleClearEmpireData}
           />
         )}
       </main>

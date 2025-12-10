@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
 import { EmpireCity, ResourceType } from '../../types';
 import ResourceIcon from '../ResourceIcon';
-import { Building2, Info, ArrowUpCircle, PlayCircle } from 'lucide-react';
+import { Building2, Info, ArrowUpCircle, PlayCircle, Trash2, ArrowUp } from 'lucide-react';
 import { BUILDINGS_DB } from '../../data/buildings';
 
 interface EmpireManagerProps {
   cities: EmpireCity[];
   onOpenScriptModal: () => void;
   onSimulateData?: () => void;
+  onClearData?: () => void;
 }
 
-const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal, onSimulateData }) => {
+const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal, onSimulateData, onClearData }) => {
   const [activeTab, setActiveTab] = useState<'resources' | 'buildings'>('resources');
 
   if (cities.length === 0) {
@@ -73,14 +74,26 @@ const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal
           </button>
         </div>
         
-        {onSimulateData && (
-           <button
-              onClick={onSimulateData}
-              className="text-xs text-stone-400 hover:text-amber-600 transition-colors underline"
-           >
-             Recarregar Simulação
-           </button>
-        )}
+        <div className="flex items-center gap-3">
+             {onClearData && (
+               <button
+                  onClick={onClearData}
+                  className="bg-white hover:bg-red-50 text-stone-400 hover:text-red-600 border border-stone-200 px-3 py-2 rounded-lg font-medium transition-colors shadow-sm flex items-center gap-2 text-xs"
+                  title="Limpar todos os dados importados"
+               >
+                 <Trash2 className="w-4 h-4" />
+                 Limpar Dados
+               </button>
+             )}
+            {onSimulateData && (
+               <button
+                  onClick={onSimulateData}
+                  className="text-xs text-stone-400 hover:text-amber-600 transition-colors underline"
+               >
+                 Recarregar Simulação
+               </button>
+            )}
+        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
@@ -194,6 +207,72 @@ const ResourceTable: React.FC<{ cities: EmpireCity[] }> = ({ cities }) => {
   );
 };
 
+// Helper component for building cells with tooltip
+const BuildingCell: React.FC<{ city: EmpireCity, buildingId: string }> = ({ city, buildingId }) => {
+    const buildings = city.buildings.filter(b => b.buildingId === buildingId);
+    
+    if (buildings.length === 0) {
+        return <td className="px-2 py-3 text-center text-stone-200">-</td>;
+    }
+
+    // Determine level display
+    let levelDisplay: string | number = buildings[0].level;
+    if (buildings.length > 1) {
+        levelDisplay = buildings.map(b => b.level).join('+');
+    }
+
+    // Only show detailed tooltip for single building instances (as per request)
+    const showDetails = buildings.length === 1 && typeof levelDisplay === 'number';
+    const buildingInfo = BUILDINGS_DB.find(b => b.id === buildingId);
+    const nextLevelCost = showDetails ? buildingInfo?.costs.find(c => c.level === (levelDisplay as number) + 1) : null;
+
+    return (
+        <td className="px-2 py-3 text-center text-stone-800 font-medium relative group cursor-default">
+            {levelDisplay}
+
+            {/* Tooltip */}
+            {showDetails && nextLevelCost && (
+                <div className="absolute z-50 bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 hidden group-hover:block">
+                    <div className="bg-stone-800 text-white text-xs rounded-lg shadow-xl p-3 border border-stone-600">
+                         {/* Header */}
+                         <div className="flex items-center justify-between border-b border-stone-600 pb-2 mb-2">
+                             <span className="font-semibold text-amber-400">{buildingInfo?.name}</span>
+                             <span className="flex items-center text-stone-400 gap-1 bg-stone-700 px-1.5 py-0.5 rounded">
+                                {levelDisplay} <ArrowUp className="w-3 h-3" /> {nextLevelCost.level}
+                             </span>
+                         </div>
+                         
+                         {/* Costs */}
+                         <div className="space-y-1">
+                             <div className="text-[10px] text-stone-400 uppercase tracking-wider mb-1">Requisitos</div>
+                             <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                                {Object.entries(nextLevelCost.resources).map(([res, amount]) => {
+                                    if ((amount as number) <= 0) return null;
+                                    return (
+                                        <div key={res} className="flex items-center justify-between">
+                                            <div className="flex items-center gap-1">
+                                                <ResourceIcon type={res as ResourceType} className="w-3 h-3" />
+                                                <span className="text-stone-300">{res.substring(0,3)}</span>
+                                            </div>
+                                            <span className={`font-mono ${(amount as number) > 999999 ? 'text-amber-300' : 'text-white'}`}>
+                                                {(amount as number).toLocaleString()}
+                                            </span>
+                                        </div>
+                                    )
+                                })}
+                             </div>
+                         </div>
+                         
+                         {/* Arrow Tip */}
+                         <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1 border-4 border-transparent border-t-stone-800"></div>
+                    </div>
+                </div>
+            )}
+        </td>
+    );
+};
+
+
 const BuildingsTable: React.FC<{ cities: EmpireCity[] }> = ({ cities }) => {
   // Define key buildings to track columns for
   const keyBuildings = [
@@ -208,15 +287,6 @@ const BuildingsTable: React.FC<{ cities: EmpireCity[] }> = ({ cities }) => {
     { id: 'trading_port', label: 'Porto' },
     { id: 'wall', label: 'Muralha' },
   ];
-
-  // Helper to get building level in a city
-  const getLevel = (city: EmpireCity, bId: string) => {
-    // There might be multiple warehouses, we might want to sum them or show max
-    const buildings = city.buildings.filter(b => b.buildingId === bId);
-    if (buildings.length === 0) return null;
-    if (buildings.length === 1) return buildings[0].level;
-    return buildings.map(b => b.level).join('+'); // e.g. "10+12"
-  };
 
   return (
     <table className="w-full text-sm text-left">
@@ -239,16 +309,9 @@ const BuildingsTable: React.FC<{ cities: EmpireCity[] }> = ({ cities }) => {
                 <span className="text-xs text-stone-400 font-mono">{city.coords}</span>
               </div>
             </td>
-            {keyBuildings.map(b => {
-              const lvl = getLevel(city, b.id);
-              // Handle special case for Palace/Res Gov to merge column conceptually or visually distinguish? 
-              // For now simpler is better.
-              return (
-                <td key={b.id} className={`px-2 py-3 text-center ${lvl ? 'text-stone-800 font-medium' : 'text-stone-200'}`}>
-                  {lvl || '-'}
-                </td>
-              );
-            })}
+            {keyBuildings.map(b => (
+                <BuildingCell key={b.id} city={city} buildingId={b.id} />
+            ))}
           </tr>
         ))}
       </tbody>
