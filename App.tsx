@@ -301,6 +301,7 @@ const AuthenticatedApp: React.FC = () => {
         ) : (
           <EmpireManager 
             cities={empireData} 
+            shipments={shipments}
             onOpenScriptModal={() => setIsScriptModalOpen(true)}
             onSimulateData={handleSimulateData}
             onClearData={handleClearEmpireData}

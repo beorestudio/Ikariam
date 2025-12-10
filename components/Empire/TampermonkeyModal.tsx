@@ -14,10 +14,10 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
   const appUrl = window.location.origin;
 
   const scriptCode = `// ==UserScript==
-// @name         Ikariam Empire Connector v3
+// @name         Ikariam Empire Connector v4 (Auto-Scan)
 // @namespace    http://tampermonkey.net/
-// @version      3.0
-// @description  Coleta dados conforme você navega e envia para o Booster
+// @version      4.0
+// @description  Coleta dados de todas as cidades automaticamente em background
 // @author       Ikariam Booster
 // @match        https://*.ikariam.gameforge.com/*
 // @grant        unsafeWindow
@@ -31,6 +31,7 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
     const APP_URL = "${appUrl}";
     const STORAGE_KEY = 'ikariam_booster_empire_data';
     const SYNC_BUTTON_ID = 'ikariam-booster-sync-btn';
+    const SCAN_BUTTON_ID = 'ikariam-booster-scan-btn';
 
     // --- Mapeamentos ---
     const RESOURCE_MAP = {
@@ -86,55 +87,65 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
 
     function saveEmpire(data) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        updateButtonsUI();
     }
 
-    function parseCurrentView() {
-        try {
-            const dataSet = unsafeWindow.dataSetForView;
-            if (!dataSet || !dataSet.relatedCityData || !dataSet.relatedCityData.selectedCity) return;
+    // Extrai dados de um objeto dataSet (seja da view atual ou de um fetch em background)
+    function extractDataFromDataSet(dataSet, empireStore) {
+        if (!dataSet || !dataSet.relatedCityData || !dataSet.relatedCityData.selectedCity) return empireStore;
 
-            const selectedCityKey = dataSet.relatedCityData.selectedCity; // e.g. "city_7511"
-            const cityInfo = dataSet.relatedCityData[selectedCityKey];
-            const cityId = cityInfo.id;
+        const selectedCityKey = dataSet.relatedCityData.selectedCity; // e.g. "city_7511"
+        const cityInfo = dataSet.relatedCityData[selectedCityKey];
+        
+        // Se por algum motivo o cityInfo for nulo, tenta achar pelo ID direto nos breadcrumbs ou algo similar, 
+        // mas geralmente relatedCityData tem tudo.
+        if (!cityInfo) return empireStore;
 
-            // Carrega império existente para atualizar apenas esta cidade
-            const empire = getStoredEmpire();
+        const cityId = cityInfo.id;
 
-            // 1. Parse Resources
-            // O jogo usa resourceProduction como float por segundo (geralmente)
-            const woodProd = (dataSet.resourceProduction || 0) * 3600; 
-            const luxuryType = dataSet.producedTradegood; 
-            const luxuryProd = (dataSet.tradegoodProduction || 0) * 3600;
+        // 1. Parse Resources
+        const woodProd = (dataSet.resourceProduction || 0) * 3600; 
+        const luxuryType = dataSet.producedTradegood; 
+        const luxuryProd = (dataSet.tradegoodProduction || 0) * 3600;
 
-            const resources = {};
-            
-            // Helper para montar obj de recurso
-            const setRes = (id, keyName, prodVal) => {
-                const name = RESOURCE_MAP[id];
-                if(!name) return;
-                resources[name] = {
-                    resourceType: name,
-                    currentAmount: Math.floor(dataSet.currentResources[keyName] || 0),
-                    maxCapacity: Math.floor(dataSet.maxResources[keyName] || 0),
-                    production: Math.floor(prodVal),
-                    isFull: (dataSet.currentResources[keyName] >= dataSet.maxResources[keyName])
-                };
+        const resources = {};
+        
+        const setRes = (id, keyName, prodVal) => {
+            const name = RESOURCE_MAP[id];
+            if(!name) return;
+            resources[name] = {
+                resourceType: name,
+                currentAmount: Math.floor(dataSet.currentResources[keyName] || 0),
+                maxCapacity: Math.floor(dataSet.maxResources[keyName] || 0),
+                production: Math.floor(prodVal),
+                isFull: (dataSet.currentResources[keyName] >= dataSet.maxResources[keyName])
             };
+        };
 
-            setRes('resource', 'resource', woodProd);
-            setRes(luxuryType, luxuryType, luxuryProd);
-            // Zera produção dos outros tipos
-            ['1','2','3','4'].forEach(k => {
-                if(k !== luxuryType) setRes(k, k, 0);
-            });
+        setRes('resource', 'resource', woodProd);
+        setRes(luxuryType, luxuryType, luxuryProd);
+        // Zera produção dos outros
+        ['1','2','3','4'].forEach(k => {
+            if(k !== luxuryType) setRes(k, k, 0);
+        });
 
-            // 2. Parse Buildings
-            // Só conseguimos ler edifícios se estivermos na visão da cidade
-            let buildings = [];
-            const screen = unsafeWindow.ikariam.getScreen();
-            const isCityView = dataSet.viewParams.view === 'city';
-
-            if (isCityView && screen && screen.data && screen.data.position) {
+        // 2. Parse Buildings
+        // Precisamos verificar se estamos na visão da cidade ou se o dataSet tem dados de posição
+        // No fetch background, dataSetForView costuma vir completo se a URL for view=city
+        let buildings = [];
+        
+        // No background, não temos 'screen', temos que confiar no dataSet ou parsear HTML extra se necessário.
+        // Felizmente, dataSetForView muitas vezes contém info, mas as vezes o jogo separa.
+        // O método mais robusto é olhar para a variável 'backgroundData' se disponível, 
+        // mas vamos tentar extrair do HTML se o dataset for insuficiente.
+        // Nota: O dataSetForView NÃO contém a lista de edifícios diretamente em arrays simples na maioria das versões.
+        // Ele depende do objeto 'ikariam.getScreen().data.position' que é construído pelo JS do jogo.
+        // Porém, como estamos rodando o script, podemos tentar capturar do HTML bruto se necessário.
+        
+        // HACK: Se estivermos rodando na janela ativa, usamos o método normal:
+        if (unsafeWindow.dataSetForView === dataSet && unsafeWindow.ikariam && unsafeWindow.ikariam.getScreen()) {
+             const screen = unsafeWindow.ikariam.getScreen();
+             if (screen.data && screen.data.position) {
                 buildings = screen.data.position.map(pos => {
                     if (!pos.building) return null;
                     return {
@@ -144,30 +155,136 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
                         position: pos.position
                     };
                 }).filter(b => b !== null);
-            } else {
-                // Se não estiver na visão da cidade, mantém os edifícios antigos do cache
-                if (empire[cityId] && empire[cityId].buildings) {
-                    buildings = empire[cityId].buildings;
+             }
+        } 
+        
+        // Se estamos processando dados de background, 'unsafeWindow' não ajuda. 
+        // O 'dataSet' passado aqui foi extraído via Regex do HTML.
+        // Infelizmente, a lista de edifícios nem sempre está no dataSetForView JSON puro.
+        // Ela costuma estar em outro script: "updateBackgroundData" ou no HTML direto.
+        // Para simplificar a V4, vamos focar em garantir RECURSOS em background (o mais importante para logistica)
+        // e manter edifícios se já existirem no cache, ou tentar um parse básico.
+        
+        // Atualiza objeto da cidade
+        const existingCity = empireStore[cityId] || {};
+        
+        // Se não conseguimos ler edifícios (background), mantemos os antigos
+        const finalBuildings = buildings.length > 0 ? buildings : (existingCity.buildings || []);
+
+        empireStore[cityId] = {
+            id: cityId,
+            name: cityInfo.name,
+            coords: cityInfo.coords,
+            islandId: dataSet.viewParams.islandId,
+            resources: resources,
+            buildings: finalBuildings,
+            updatedAt: Date.now()
+        };
+
+        return empireStore;
+    }
+
+    // Leitura passiva (navegação normal)
+    function parseCurrentView() {
+        try {
+            const dataSet = unsafeWindow.dataSetForView;
+            const empire = getStoredEmpire();
+            const updatedEmpire = extractDataFromDataSet(dataSet, empire);
+            saveEmpire(updatedEmpire);
+        } catch (e) {
+            console.error('Ikariam Booster: Erro ao ler dados passivos', e);
+        }
+    }
+
+    // --- Background Scanning Logic ---
+
+    async function scanAllCities() {
+        const btn = document.getElementById(SCAN_BUTTON_ID);
+        if(btn) btn.disabled = true;
+
+        try {
+            // Pega lista de cidades do modelo global
+            const cityList = unsafeWindow.ikariam.model.relatedCityData;
+            const cityIds = Object.keys(cityList).filter(k => k.startsWith('city_')).map(k => cityList[k].id);
+            
+            let empire = getStoredEmpire();
+            let count = 0;
+
+            for (const cityId of cityIds) {
+                count++;
+                if(btn) btn.innerHTML = '⏳ Lendo ' + count + '/' + cityIds.length + '...';
+                
+                // Delay aleatório para evitar detecção (800ms a 1500ms)
+                const delay = Math.floor(Math.random() * 700) + 800;
+                await new Promise(r => setTimeout(r, delay));
+
+                // Fetch HTML da cidade
+                const response = await fetch('/index.php?view=city&cityId=' + cityId);
+                const htmlText = await response.text();
+
+                // Extrair dataSetForView usando Regex
+                const regex = /window\.dataSetForView\s*=\s*(\{.*?\});/s;
+                const match = htmlText.match(regex);
+
+                if (match && match[1]) {
+                    const jsonStr = match[1];
+                    try {
+                        const backgroundDataSet = JSON.parse(jsonStr);
+                        empire = extractDataFromDataSet(backgroundDataSet, empire);
+                        
+                        // Parse extra de edifícios via HTML (Regex simples nos tooltips ou areas)
+                        // Procura patterns como: area title="Câmara Municipal Nível 25"
+                        // Nota: Isso é um fallback básico.
+                        // <li id="position1" class="townHall building matching_building level25 ...">
+                        const buildingRegex = /<li\s+id="position(\d+)"\s+class="([^"]*?building[^"]*?)"/g;
+                        let bMatch;
+                        const backgroundBuildings = [];
+                        
+                        while ((bMatch = buildingRegex.exec(htmlText)) !== null) {
+                            const pos = bMatch[1];
+                            const classes = bMatch[2];
+                            
+                            // Extrair tipo e nível das classes
+                            // Ex: "townHall building matching_building level25"
+                            const typeMatch = classes.match(/^(\w+)\s/);
+                            const levelMatch = classes.match(/level(\d+)/);
+                            
+                            if (typeMatch && levelMatch) {
+                                const rawType = typeMatch[1];
+                                const type = BUILDING_MAP[rawType] || rawType;
+                                // Ignore 'buildingGround' (terreno vazio)
+                                if (rawType !== 'buildingGround' && rawType !== 'constructionSite') {
+                                     backgroundBuildings.push({
+                                        buildingId: type,
+                                        level: parseInt(levelMatch[1]),
+                                        name: rawType, // Nome exato é dificil sem o title, usa o ID
+                                        position: pos
+                                    });
+                                }
+                            }
+                        }
+                        
+                        if (backgroundBuildings.length > 0) {
+                            empire[cityId].buildings = backgroundBuildings;
+                        }
+
+                    } catch (parseErr) {
+                        console.error("Erro parsing JSON background", parseErr);
+                    }
                 }
             }
 
-            // Atualiza objeto da cidade
-            empire[cityId] = {
-                id: cityId,
-                name: cityInfo.name,
-                coords: cityInfo.coords,
-                islandId: dataSet.viewParams.islandId, // Disponível no viewParams
-                resources: resources,
-                buildings: buildings,
-                updatedAt: Date.now()
-            };
-
             saveEmpire(empire);
-            // console.log('Ikariam Booster: Cidade atualizada', empire[cityId]);
-            updateButtonStatus(Object.keys(empire).length);
+            if(btn) {
+                btn.innerHTML = '✅ Concluído!';
+                setTimeout(() => updateButtonsUI(), 2000);
+            }
 
         } catch (e) {
-            console.error('Ikariam Booster: Erro ao ler dados', e);
+            console.error('Erro no scan', e);
+            if(btn) btn.innerHTML = '❌ Erro';
+        } finally {
+            if(btn) btn.disabled = false;
         }
     }
 
@@ -176,7 +293,7 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
         const payload = Object.values(empire);
 
         if (payload.length === 0) {
-            alert("Nenhum dado coletado ainda. Navegue pelas suas cidades para o script ler os dados.");
+            alert("Nenhum dado. Navegue ou use o 'Escanear Império'.");
             return;
         }
 
@@ -192,47 +309,76 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
                 if(btn) {
                     btn.innerHTML = '✅ Enviado!';
                     btn.style.backgroundColor = '#059669';
-                    setTimeout(() => {
-                        btn.innerHTML = '⚡ Enviar (' + payload.length + ')';
-                        btn.style.backgroundColor = '#8B4513';
-                    }, 2000);
+                    setTimeout(() => updateButtonsUI(), 2000);
                 }
             }, 1500);
         } else {
-            alert("Habilite popups para permitir a conexão com o Booster.");
+            alert("Habilite popups para permitir a conexão.");
         }
     }
 
-    function updateButtonStatus(count) {
-        const btn = document.getElementById(SYNC_BUTTON_ID);
-        if(btn) btn.innerHTML = '⚡ Enviar (' + count + ')';
+    function updateButtonsUI() {
+        const empire = getStoredEmpire();
+        const count = Object.keys(empire).length;
+        
+        const btnSync = document.getElementById(SYNC_BUTTON_ID);
+        if(btnSync) {
+            btnSync.innerHTML = '⚡ Enviar (' + count + ')';
+            btnSync.style.backgroundColor = '#8B4513';
+        }
+
+        const btnScan = document.getElementById(SCAN_BUTTON_ID);
+        if(btnScan) {
+            btnScan.innerHTML = '🔄 Escanear Tudo';
+        }
     }
 
     function createUI() {
         if (document.getElementById(SYNC_BUTTON_ID)) return;
 
-        const empire = getStoredEmpire();
-        const count = Object.keys(empire).length;
+        const container = document.createElement('div');
+        container.style.position = 'fixed';
+        container.style.bottom = '15px';
+        container.style.right = '15px';
+        container.style.zIndex = '99999';
+        container.style.display = 'flex';
+        container.style.gap = '10px';
 
-        const btn = document.createElement('button');
-        btn.id = SYNC_BUTTON_ID;
-        btn.innerHTML = '⚡ Enviar (' + count + ')';
-        btn.style.position = 'fixed';
-        btn.style.bottom = '15px';
-        btn.style.right = '15px';
-        btn.style.zIndex = '99999';
-        btn.style.padding = '10px 15px';
-        btn.style.backgroundColor = '#8B4513';
+        // Botão de Scan
+        const btnScan = document.createElement('button');
+        btnScan.id = SCAN_BUTTON_ID;
+        btnScan.innerHTML = '🔄 Escanear Tudo';
+        btnScan.onclick = scanAllCities;
+        styleBtn(btnScan, '#2563EB'); // Blue
+
+        // Botão de Enviar
+        const btnSync = document.createElement('button');
+        btnSync.id = SYNC_BUTTON_ID;
+        btnSync.innerHTML = '⚡ Enviar';
+        btnSync.onclick = sendData;
+        styleBtn(btnSync, '#8B4513'); // Brown
+
+        container.appendChild(btnScan);
+        container.appendChild(btnSync);
+        document.body.appendChild(container);
+        
+        updateButtonsUI();
+    }
+
+    function styleBtn(btn, color) {
+        btn.style.padding = '8px 12px';
+        btn.style.backgroundColor = color;
         btn.style.color = '#FFF';
-        btn.style.border = '2px solid #FCD34D';
+        btn.style.border = '2px solid rgba(255,255,255,0.2)';
         btn.style.borderRadius = '50px';
         btn.style.cursor = 'pointer';
         btn.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
         btn.style.fontWeight = 'bold';
-        btn.style.fontSize = '13px';
-        
-        btn.onclick = sendData;
-        document.body.appendChild(btn);
+        btn.style.fontSize = '12px';
+        btn.style.fontFamily = 'Arial, sans-serif';
+        btn.onmouseover = () => { btn.style.transform = 'scale(1.05)'; };
+        btn.onmouseout = () => { btn.style.transform = 'scale(1)'; };
+        btn.style.transition = 'transform 0.1s';
     }
 
     // Inicialização
@@ -241,12 +387,11 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
         createUI();
     }, 1000);
 
-    // Tenta atualizar também em respostas AJAX (navegação interna)
-    // Intercepta XMLHttpRequest nativo para detectar mudanças de cidade sem reload
+    // Interceptor AJAX (mantido para navegação manual fluida)
     const originalOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function() {
         this.addEventListener('load', function() {
-            setTimeout(parseCurrentView, 500); // Espera o DOM atualizar
+            setTimeout(parseCurrentView, 500); 
         });
         originalOpen.apply(this, arguments);
     };
@@ -273,7 +418,7 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
         <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-3xl sm:w-full">
           <div className="bg-emerald-800 px-4 py-3 flex justify-between items-center text-white">
             <h3 className="text-lg font-medium flex items-center gap-2">
-              <Download className="w-5 h-5" /> Instalar Script Tampermonkey v3
+              <Download className="w-5 h-5" /> Instalar Script Tampermonkey v4 (Auto-Scan)
             </h3>
             <button onClick={onClose} className="text-emerald-200 hover:text-white">
               <X className="w-5 h-5" />
@@ -282,14 +427,13 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
 
           <div className="p-6">
             <div className="mb-6">
-              <h4 className="text-stone-800 font-semibold mb-2">Instruções de Atualização:</h4>
+              <h4 className="text-stone-800 font-semibold mb-2">Instruções de Atualização v4.0:</h4>
               <ol className="list-decimal list-inside text-sm text-stone-600 space-y-2">
                 <li>Abra o painel do <strong>Tampermonkey</strong> e edite o script antigo.</li>
-                <li>Substitua <strong>todo</strong> o código pelo novo código abaixo.</li>
-                <li>Salve (Ctrl+S).</li>
-                <li>Recarregue a página do Ikariam.</li>
-                <li><strong>Importante:</strong> Visite cada uma das suas cidades uma vez para que o script capture os edifícios e recursos de todas elas. O contador no botão irá aumentar.</li>
-                <li>Quando terminar, clique em "Enviar".</li>
+                <li>Substitua <strong>todo</strong> o código pelo novo código abaixo (v4.0).</li>
+                <li>Salve (Ctrl+S) e recarregue o Ikariam.</li>
+                <li><strong>Novidade:</strong> Agora aparecerá um botão azul <strong>"🔄 Escanear Tudo"</strong>.</li>
+                <li>Ao clicar nele, o script visitará silenciosamente todas as suas cidades em segundo plano para atualizar os dados de uma vez só!</li>
               </ol>
             </div>
 
@@ -315,8 +459,7 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
             <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-md text-xs text-blue-800 flex items-start gap-2">
               <span className="font-bold text-lg leading-none">i</span>
               <p>
-                O script agora possui uma memória interna. Ele grava os dados de cada cidade que você visita.
-                Isso garante que ao clicar em enviar, os dados de <strong>todas</strong> as cidades visitadas sejam enviados de uma vez, e não apenas a atual.
+                <strong>Nota sobre segurança:</strong> O modo "Escanear Tudo" adiciona um pequeno atraso aleatório entre cada cidade para simular um humano e evitar bloqueios do jogo. O processo pode levar alguns segundos.
               </p>
             </div>
           </div>

@@ -1,18 +1,19 @@
 import React, { useState } from 'react';
-import { EmpireCity, ResourceType, ResourceAmount, INITIAL_RESOURCES, BuildingCost } from '../../types';
+import { EmpireCity, ResourceType, ResourceAmount, INITIAL_RESOURCES, BuildingCost, Shipment } from '../../types';
 import ResourceIcon from '../ResourceIcon';
-import { Building2, Info, ArrowUpCircle, PlayCircle, Trash2, ArrowUp, Calculator, CheckCircle2, AlertTriangle, Truck, Plus, X } from 'lucide-react';
+import { Building2, Info, ArrowUpCircle, PlayCircle, Trash2, ArrowUp, Calculator, CheckCircle2, AlertTriangle, Truck, Plus, X, Hammer, Clock } from 'lucide-react';
 import { BUILDINGS_DB } from '../../data/buildings';
 
 interface EmpireManagerProps {
   cities: EmpireCity[];
+  shipments?: Shipment[]; // Add shipments prop
   onOpenScriptModal: () => void;
   onSimulateData?: () => void;
   onClearData?: () => void;
   onCreateShipment?: (destination: string, missingResources: ResourceAmount, description?: string) => void;
 }
 
-const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal, onSimulateData, onClearData, onCreateShipment }) => {
+const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, shipments = [], onOpenScriptModal, onSimulateData, onClearData, onCreateShipment }) => {
   const [activeTab, setActiveTab] = useState<'resources' | 'buildings' | 'calculator'>('resources');
 
   if (cities.length === 0) {
@@ -110,8 +111,13 @@ const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal
 
       <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
         {activeTab === 'resources' && (
-           <div className="overflow-x-auto">
-             <ResourceTable cities={cities} />
+           <div className="p-6 space-y-8">
+             {/* New Panel for Construction Readiness */}
+             <ConstructionReadinessPanel cities={cities} shipments={shipments} />
+             
+             <div className="overflow-x-auto -mx-6 px-6">
+               <ResourceTable cities={cities} />
+             </div>
            </div>
         )}
         {activeTab === 'buildings' && (
@@ -132,6 +138,121 @@ const EmpireManager: React.FC<EmpireManagerProps> = ({ cities, onOpenScriptModal
 };
 
 // --- Sub-components ---
+
+// --- NEW COMPONENT: CONSTRUCTION READINESS PANEL ---
+const ConstructionReadinessPanel: React.FC<{ cities: EmpireCity[], shipments: Shipment[] }> = ({ cities, shipments }) => {
+  // Filter active shipments that have notes (implying a construction goal)
+  // and match them with existing cities in the empire data
+  const trackedGoals = shipments
+    .filter(s => s.status !== 'Concluído')
+    .map(shipment => {
+      const city = cities.find(c => c.name === shipment.destinationCity);
+      return { shipment, city };
+    })
+    // Only show if we found the city in our empire data
+    .filter(item => item.city !== undefined);
+
+  if (trackedGoals.length === 0) return null;
+
+  return (
+    <div className="space-y-4 mb-8">
+      <h3 className="text-lg font-bold text-stone-700 flex items-center gap-2">
+        <Hammer className="w-5 h-5 text-amber-600" />
+        Status de Construção (Metas Ativas)
+      </h3>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {trackedGoals.map(({ shipment, city }) => {
+          if (!city) return null; // TS Check
+
+          // Calculate readiness
+          let allReady = true;
+          let totalProgress = 0;
+          let resourceCount = 0;
+
+          const analysis = Object.entries(shipment.resources)
+            .filter(([_, amount]) => (amount as number) > 0)
+            .map(([res, targetAmount]) => {
+              const type = res as ResourceType;
+              const currentAmount = city.resources[type]?.currentAmount || 0;
+              const target = targetAmount as number;
+              const isReady = currentAmount >= target;
+              const missing = Math.max(0, target - currentAmount);
+              
+              if (!isReady) allReady = false;
+              resourceCount++;
+              totalProgress += Math.min(1, currentAmount / target);
+
+              return { type, currentAmount, target, isReady, missing };
+            });
+
+          const overallPercent = resourceCount > 0 ? (totalProgress / resourceCount) * 100 : 100;
+
+          return (
+            <div key={shipment.id} className={`rounded-lg border shadow-sm p-4 relative overflow-hidden transition-all hover:shadow-md ${allReady ? 'bg-green-50 border-green-200' : 'bg-white border-stone-200'}`}>
+              
+              {/* Header */}
+              <div className="flex justify-between items-start mb-3 relative z-10">
+                <div>
+                  <h4 className="font-bold text-stone-800 text-sm line-clamp-1" title={shipment.notes || 'Encomenda sem descrição'}>
+                    {shipment.notes ? shipment.notes.split('\n')[0] : `Encomenda de ${new Date(shipment.createdAt).toLocaleDateString()}`}
+                  </h4>
+                  <div className="text-xs text-stone-500 flex items-center gap-1 mt-1">
+                    <span className="font-medium text-stone-600">{city.name}</span>
+                    <span className="text-stone-300">•</span>
+                    <span className="bg-stone-100 px-1.5 rounded text-[10px]">{city.coords}</span>
+                  </div>
+                </div>
+                
+                {allReady ? (
+                  <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full flex items-center gap-1 font-bold shadow-sm">
+                    <CheckCircle2 className="w-3 h-3" /> PRONTO
+                  </span>
+                ) : (
+                  <span className="bg-amber-100 text-amber-700 text-xs px-2 py-1 rounded-full flex items-center gap-1 font-bold shadow-sm">
+                    <Clock className="w-3 h-3" /> Aguardando
+                  </span>
+                )}
+              </div>
+
+              {/* Resource List */}
+              <div className="space-y-2 relative z-10 mt-3">
+                {analysis.map((res) => (
+                  <div key={res.type} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5 w-24">
+                      <ResourceIcon type={res.type} className="w-3.5 h-3.5" />
+                      <span className="text-stone-600 font-medium truncate">{res.type}</span>
+                    </div>
+                    
+                    <div className="flex-1 mx-2 h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full ${res.isReady ? 'bg-green-500' : 'bg-amber-400'}`}
+                        style={{ width: `${Math.min(100, (res.currentAmount / res.target) * 100)}%` }}
+                      />
+                    </div>
+
+                    <div className="text-right w-20 font-mono">
+                      {res.isReady ? (
+                        <span className="text-green-600 font-bold">OK</span>
+                      ) : (
+                        <span className="text-red-500 font-medium">-{res.missing.toLocaleString()}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Background Status Bar */}
+              {!allReady && (
+                 <div className="absolute bottom-0 left-0 h-1 bg-amber-200" style={{ width: `${overallPercent}%` }}></div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 const ResourceTable: React.FC<{ cities: EmpireCity[] }> = ({ cities }) => {
   const resourceTypes = [
