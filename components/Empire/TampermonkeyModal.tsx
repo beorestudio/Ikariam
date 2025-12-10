@@ -13,136 +13,241 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
 
   const appUrl = window.location.origin;
 
+  // Real extraction logic script
   const scriptCode = `// ==UserScript==
 // @name         Ikariam Empire Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  Envia dados do Ikariam para o Ikariam Booster
+// @version      2.0
+// @description  Envia dados reais do Ikariam para o Ikariam Booster
 // @author       Ikariam Booster
 // @match        https://*.ikariam.gameforge.com/*
-// @grant        none
+// @grant        unsafeWindow
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    // CONFIGURAÇÃO: URL do seu App (Localhost ou Vercel)
     const APP_URL = "${appUrl}"; 
-    // ^^^ O script atualiza isso automaticamente com a URL atual, 
-    // mas se hospedar em outro lugar, altere aqui.
+    const SYNC_BUTTON_ID = 'ikariam-booster-sync-btn';
 
-    console.log("Ikariam Connector Iniciado. Alvo:", APP_URL);
+    console.log("Ikariam Connector v2 Iniciado. Alvo:", APP_URL);
 
-    // Função para extrair dados
-    function extractData() {
+    // --- Mapeamentos ---
+    // Mapeia IDs/Nomes do Ikariam para os IDs do nosso App
+    const RESOURCE_MAP = {
+        'resource': 'Madeira',
+        '1': 'Vinho', 'wine': 'Vinho',
+        '2': 'Mármore', 'marble': 'Mármore',
+        '3': 'Cristal', 'glass': 'Cristal',
+        '4': 'Enxofre', 'sulfur': 'Enxofre'
+    };
+
+    const BUILDING_MAP = {
+        'townHall': 'town_hall',
+        'academy': 'academy',
+        'warehouse': 'warehouse',
+        'tavern': 'tavern',
+        'palace': 'palace',
+        'palaceColony': 'governor_residence',
+        'museum': 'museum',
+        'port': 'trading_port',
+        'shipyard': 'shipyard',
+        'barracks': 'barracks',
+        'wall': 'town_wall',
+        'embassy': 'embassy',
+        'branchOffice': 'market',
+        'workshop': 'workshop',
+        'safehouse': 'hideout',
+        'forester': 'forester',
+        'glassblower': 'glassblower',
+        'alchemist': 'alchemist',
+        'winegrower': 'wine_grower',
+        'stonemason': 'stonemason',
+        'carpentering': 'carpenter',
+        'optician': 'optician',
+        'fireworker': 'firework',
+        'vineyard': 'wine_cellar',
+        'architect': 'architect',
+        'temple': 'temple',
+        'pirateFortress': 'pirate_fortress',
+        'blackMarket': 'black_market',
+        'marineChartArchive': 'sea_chart_archive',
+        'shrineOfOlympus': 'shrine', // Verifica nome correto ingame se necessário
+        'dump': 'dump'
+    };
+
+    function getIkariamData() {
         try {
-            const data = unsafeWindow.ikariam.getScreen().data; // Tenta pegar do objeto global do jogo
-            // Nota: A estrutura real do objeto do Ikariam varia. 
-            // Este é um exemplo estrutural de como o script funcionaria.
-            // Em um cenário real, precisaríamos parsear o DOM ou acessar 'ika.model'.
-            
-            // Vamos simular a extração baseada no que geralmente está disponível no 'ika' object
-            const cityData = [];
-            
-            // Exemplo de acesso ao modelo global (hipotético, depende da versão do jogo)
-            // const cities = ikariam.model.cities; 
-            
-            // Para este exemplo funcionar no app de demonstração, 
-            // vamos criar um botão na interface do jogo para "Enviar Dados"
-            // que raspa o DOM da visualização atual.
+            const ika = unsafeWindow.ikariam;
+            if (!ika || !ika.model) {
+                console.error("Modelo do Ikariam não encontrado.");
+                return null;
+            }
+
+            const relatedData = ika.model.relatedCityData;
+            const citiesList = [];
+
+            // relatedCityData é um objeto onde as chaves são "city_ID"
+            Object.keys(relatedData).forEach(key => {
+                if (!key.startsWith('city_')) return;
+                
+                const data = relatedData[key];
+                
+                // Preparar objeto de recursos
+                const resources = {};
+                
+                // Função auxiliar para mapear recursos
+                const mapRes = (rawKey, prodKey, capKey) => {
+                    const mappedName = RESOURCE_MAP[rawKey] || RESOURCE_MAP[prodKey];
+                    if (!mappedName) return;
+
+                    const current = data.currentResources ? (data.currentResources[rawKey] || 0) : 0;
+                    const prod = data.resourceProduction ? (data.resourceProduction[prodKey] || 0) : 0;
+                    // Capacidade é um pouco complexa no objeto global, as vezes vem bruta, as vezes calculada.
+                    // Fallback para storageCapacity geral se não houver específico
+                    const cap = data.maxResources ? (data.maxResources[rawKey] || data.storageCapacity || 0) : (data.storageCapacity || 0);
+
+                    resources[mappedName] = {
+                        resourceType: mappedName,
+                        currentAmount: Math.floor(current),
+                        production: Math.floor(prod * 3600), // Ikariam prod é por segundo normalmente no modelo interno
+                        maxCapacity: Math.floor(cap),
+                        isFull: current >= cap
+                    };
+                };
+
+                // Madeira (resource / production)
+                mapRes('resource', 'resource'); 
+                // Luxo (depends on trade good type)
+                if (data.producedTradegood) {
+                    mapRes(data.producedTradegood, data.producedTradegood);
+                }
+                // Tenta mapear todos os índices numéricos conhecidos (1,2,3,4) caso existam no currentResources
+                ['1','2','3','4'].forEach(idx => {
+                    if (data.currentResources && data.currentResources[idx] !== undefined) {
+                        mapRes(idx, idx);
+                    }
+                });
+
+                // Edifícios
+                // O objeto global 'position' contém os edifícios da cidade ATUAL.
+                // Para outras cidades, o relatedCityData nem sempre tem os edifícios detalhados a menos que tenhamos visitado.
+                const buildings = [];
+                if (data.position && Array.isArray(data.position)) {
+                    data.position.forEach(pos => {
+                        if (pos && pos.building) {
+                            const mappedId = BUILDING_MAP[pos.building] || pos.building;
+                            buildings.push({
+                                buildingId: mappedId,
+                                level: pos.level,
+                                name: pos.name || mappedId, // Fallback name
+                                position: pos.position
+                            });
+                        }
+                    });
+                }
+
+                // Coordenadas
+                const coords = \`[\${data.coords}]\`; // Geralmente "[x:y]" já vem formatado ou separado
+
+                citiesList.push({
+                    id: data.id,
+                    name: data.name,
+                    coords: coords,
+                    islandId: data.islandId,
+                    resources: resources,
+                    buildings: buildings,
+                    updatedAt: Date.now()
+                });
+            });
+
+            return citiesList;
+
         } catch (e) {
-            console.error("Erro ao extrair dados", e);
+            console.error("Erro ao extrair dados do Ikariam:", e);
+            alert("Erro ao ler dados do jogo. Veja o console (F12).");
+            return null;
         }
     }
 
-    // Criação do Botão na Interface do Jogo
-    function createSyncButton() {
-        const container = document.createElement('div');
-        container.style.position = 'fixed';
-        container.style.bottom = '20px';
-        container.style.right = '20px';
-        container.style.zIndex = '9999';
-        
+    function createUI() {
+        if (document.getElementById(SYNC_BUTTON_ID)) return;
+
         const btn = document.createElement('button');
-        btn.innerText = "Sincronizar com Booster";
-        btn.style.backgroundColor = "#8B4513";
-        btn.style.color = "white";
-        btn.style.border = "2px solid #DAA520";
-        btn.style.padding = "10px";
-        btn.style.cursor = "pointer";
-        btn.style.fontWeight = "bold";
-        btn.style.borderRadius = "5px";
-        
-        btn.onclick = function() {
-            syncData();
+        btn.id = SYNC_BUTTON_ID;
+        btn.innerHTML = '⚡ <b>Enviar p/ Booster</b>';
+        btn.style.position = 'fixed';
+        btn.style.bottom = '15px';
+        btn.style.right = '15px';
+        btn.style.zIndex = '99999';
+        btn.style.padding = '12px 20px';
+        btn.style.backgroundColor = '#8B4513'; // Amber-900 like
+        btn.style.color = '#FFF';
+        btn.style.border = '2px solid #FCD34D'; // Amber-300 like
+        btn.style.borderRadius = '8px';
+        btn.style.cursor = 'pointer';
+        btn.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
+        btn.style.fontFamily = 'Arial, sans-serif';
+        btn.style.fontSize = '14px';
+        btn.style.transition = 'transform 0.1s';
+
+        btn.onmousedown = () => btn.style.transform = 'scale(0.95)';
+        btn.onmouseup = () => btn.style.transform = 'scale(1)';
+
+        btn.onclick = () => {
+            const data = getIkariamData();
+            if (data && data.length > 0) {
+                sendData(data);
+            } else {
+                alert("Nenhum dado de cidade encontrado. Certifique-se de estar logado no jogo.");
+            }
         };
-        
-        container.appendChild(btn);
-        document.body.appendChild(container);
+
+        document.body.appendChild(btn);
     }
 
-    function syncData() {
-        // Coleta dados FALSOS/MOCKUP para demonstração se não conseguir ler o jogo real
-        // Num script real, aqui vai a lógica de scraping:
-        // var wood = document.getElementById('value_wood').innerText...
+    function sendData(payload) {
+        // Tenta encontrar a janela aberta do Booster
+        // Se o usuário abriu o jogo a partir do link "Conectar", window.opener pode existir (mas cross-origin bloqueia acesso direto, postMessage funciona)
+        // Se não, tentamos abrir/focar a janela ou usar BroadcastChannel se estivesse na mesma origem (não estão).
         
-        const mockCities = [
-            {
-                id: 1,
-                name: "Polis Alpha",
-                coords: "[50:50]",
-                islandId: 100,
-                resources: {
-                    "Madeira": { currentAmount: Math.floor(Math.random()*10000), maxCapacity: 20000, production: 500 },
-                    "Vinho": { currentAmount: Math.floor(Math.random()*5000), maxCapacity: 10000, production: 0 },
-                    "Mármore": { currentAmount: Math.floor(Math.random()*8000), maxCapacity: 15000, production: 300 }
-                },
-                buildings: [
-                    { buildingId: "town_hall", level: 25, name: "Câmara Municipal" },
-                    { buildingId: "academy", level: 18, name: "Academia" }
-                ],
-                updatedAt: Date.now()
-            },
-            {
-                id: 2,
-                name: "Vinha do Monte",
-                coords: "[50:51]",
-                islandId: 101,
-                resources: {
-                    "Madeira": { currentAmount: 32000, maxCapacity: 50000, production: 900 },
-                    "Vinho": { currentAmount: 15000, maxCapacity: 40000, production: 600 }
-                },
-                buildings: [
-                    { buildingId: "town_hall", level: 20, name: "Câmara Municipal" },
-                    { buildingId: "warehouse", level: 25, name: "Armazém" }
-                ],
-                updatedAt: Date.now()
-            }
-        ];
-
-        // Enviar para a janela pai ou janela aberta
-        // Tenta encontrar a janela do app
-        // Nota: window.opener funciona se o app abriu o jogo, ou vice-versa.
-        // Se estiverem separados, postMessage pode falhar sem referência direta.
-        // Solução comum: O script abre um popup oculto do app para postar e fecha.
-        
-        const targetWindow = window.open('${appUrl}', 'ikariam_booster_target');
+        // Estratégia Principal: window.open para focar ou abrir a aba do app
+        const targetWindow = window.open(APP_URL, 'ikariam_booster_target');
         
         if (targetWindow) {
+            // Pequeno delay para garantir que o React processou se a aba acabou de abrir
             setTimeout(() => {
                 targetWindow.postMessage({
                     type: 'IKARIAM_EMPIRE_DATA',
-                    payload: mockCities
-                }, '${appUrl}');
-                // targetWindow.close(); // Opcional: fechar após envio se for popup
-            }, 2000); // Espera carregar
+                    payload: payload
+                }, '*'); // Em produção, restrinja para APP_URL
+                
+                // Feedback visual no botão
+                const btn = document.getElementById(SYNC_BUTTON_ID);
+                if(btn) {
+                    const originalText = btn.innerHTML;
+                    btn.innerHTML = '✅ Dados Enviados!';
+                    btn.style.backgroundColor = '#059669'; // Green
+                    setTimeout(() => {
+                        btn.innerHTML = originalText;
+                        btn.style.backgroundColor = '#8B4513';
+                    }, 2000);
+                }
+            }, 1000);
         } else {
-            alert("Permita popups para sincronizar ou mantenha a aba do Booster aberta.");
+            alert("Não foi possível conectar à aba do Booster. Permita popups ou mantenha a aba aberta.");
         }
     }
 
-    // Inicializa
-    setTimeout(createSyncButton, 2000);
+    // Inicialização
+    // Espera o carregamento do objeto ikariam
+    const checkInterval = setInterval(() => {
+        if (unsafeWindow.ikariam && unsafeWindow.ikariam.model) {
+            clearInterval(checkInterval);
+            createUI();
+            console.log("Ikariam Booster: UI Injetada");
+        }
+    }, 1000);
 
 })();`;
 
@@ -175,13 +280,15 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
 
           <div className="p-6">
             <div className="mb-6">
-              <h4 className="text-stone-800 font-semibold mb-2">Como configurar a sincronização em tempo real:</h4>
+              <h4 className="text-stone-800 font-semibold mb-2">Instruções de Instalação:</h4>
               <ol className="list-decimal list-inside text-sm text-stone-600 space-y-2">
-                <li>Instale a extensão <strong>Tampermonkey</strong> no seu navegador.</li>
-                <li>Crie um <strong>Novo Script</strong> no painel do Tampermonkey.</li>
-                <li>Apague todo o conteúdo padrão e cole o código abaixo.</li>
-                <li>Salve o script.</li>
-                <li>Recarregue a página do Ikariam. Um botão "Sincronizar" aparecerá no canto inferior direito.</li>
+                <li>Certifique-se de ter a extensão <strong>Tampermonkey</strong> instalada.</li>
+                <li>No painel do Tampermonkey, clique em <strong>Adicionar novo script</strong> (+).</li>
+                <li>Apague qualquer código que já esteja no editor.</li>
+                <li>Clique no botão <strong>Copiar Código</strong> abaixo e cole no editor.</li>
+                <li>Salve o script (Arquivo &gt; Salvar ou Ctrl+S).</li>
+                <li>Vá para a página do jogo Ikariam e recarregue (F5).</li>
+                <li>Um botão marrom <strong>"Enviar p/ Booster"</strong> aparecerá no canto inferior direito da tela.</li>
               </ol>
             </div>
 
@@ -204,11 +311,10 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
               </pre>
             </div>
             
-            <div className="mt-4 p-3 bg-yellow-50 border border-yellow-100 rounded-md text-xs text-yellow-800 flex items-start gap-2">
-              <span className="font-bold text-lg leading-none">!</span>
+            <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-md text-xs text-blue-800 flex items-start gap-2">
+              <span className="font-bold text-lg leading-none">i</span>
               <p>
-                Este script de exemplo gera dados aleatórios (mockup) para testar a conexão com esta janela.
-                Para funcionar no jogo real, a lógica de <code>extractData</code> precisaria ser ajustada para ler o DOM específico da versão atual do Ikariam.
+                <strong>Dica:</strong> O script coleta recursos de <em>todas</em> as cidades automaticamente. Para os <strong>edifícios</strong>, ele envia os dados da cidade que você está visualizando no momento. Navegue entre suas cidades no jogo e clique no botão para atualizar os edifícios de cada uma.
               </p>
             </div>
           </div>
