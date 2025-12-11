@@ -14,10 +14,10 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
   const appUrl = window.location.origin;
 
   const scriptCode = `// ==UserScript==
-// @name         Ikariam Empire Connector v4 (Auto-Scan)
+// @name         Ikariam Empire Connector v4.1 (Auto-Scan + Construções)
 // @namespace    http://tampermonkey.net/
-// @version      4.0
-// @description  Coleta dados de todas as cidades automaticamente em background
+// @version      4.1
+// @description  Coleta recursos e FILA DE CONSTRUÇÃO de todas as cidades
 // @author       Ikariam Booster
 // @match        https://*.ikariam.gameforge.com/*
 // @grant        unsafeWindow
@@ -91,14 +91,12 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
     }
 
     // Extrai dados de um objeto dataSet (seja da view atual ou de um fetch em background)
-    function extractDataFromDataSet(dataSet, empireStore) {
+    function extractDataFromDataSet(dataSet, htmlText, empireStore) {
         if (!dataSet || !dataSet.relatedCityData || !dataSet.relatedCityData.selectedCity) return empireStore;
 
         const selectedCityKey = dataSet.relatedCityData.selectedCity; // e.g. "city_7511"
         const cityInfo = dataSet.relatedCityData[selectedCityKey];
         
-        // Se por algum motivo o cityInfo for nulo, tenta achar pelo ID direto nos breadcrumbs ou algo similar, 
-        // mas geralmente relatedCityData tem tudo.
         if (!cityInfo) return empireStore;
 
         const cityId = cityInfo.id;
@@ -124,26 +122,104 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
 
         setRes('resource', 'resource', woodProd);
         setRes(luxuryType, luxuryType, luxuryProd);
-        // Zera produção dos outros
         ['1','2','3','4'].forEach(k => {
             if(k !== luxuryType) setRes(k, k, 0);
         });
 
-        // 2. Parse Buildings
-        // Precisamos verificar se estamos na visão da cidade ou se o dataSet tem dados de posição
-        // No fetch background, dataSetForView costuma vir completo se a URL for view=city
+        // 2. Parse Buildings & Construction Queue from HTML/JSON
         let buildings = [];
+        let constructionQueue = [];
         
-        // No background, não temos 'screen', temos que confiar no dataSet ou parsear HTML extra se necessário.
-        // Felizmente, dataSetForView muitas vezes contém info, mas as vezes o jogo separa.
-        // O método mais robusto é olhar para a variável 'backgroundData' se disponível, 
-        // mas vamos tentar extrair do HTML se o dataset for insuficiente.
-        // Nota: O dataSetForView NÃO contém a lista de edifícios diretamente em arrays simples na maioria das versões.
-        // Ele depende do objeto 'ikariam.getScreen().data.position' que é construído pelo JS do jogo.
-        // Porém, como estamos rodando o script, podemos tentar capturar do HTML bruto se necessário.
-        
-        // HACK: Se estivermos rodando na janela ativa, usamos o método normal:
-        if (unsafeWindow.dataSetForView === dataSet && unsafeWindow.ikariam && unsafeWindow.ikariam.getScreen()) {
+        // Tenta extrair do HTML se fornecido (Background scan)
+        if (htmlText) {
+             // Regex para edificios
+             const buildingRegex = /<li\s+id="position(\d+)"\s+class="([^"]*?building[^"]*?)"/g;
+             let bMatch;
+             while ((bMatch = buildingRegex.exec(htmlText)) !== null) {
+                const classes = bMatch[2];
+                const typeMatch = classes.match(/^(\w+)\s/);
+                const levelMatch = classes.match(/level(\d+)/);
+                
+                if (typeMatch && levelMatch) {
+                    const rawType = typeMatch[1];
+                    const type = BUILDING_MAP[rawType] || rawType;
+                    if (rawType !== 'buildingGround' && rawType !== 'constructionSite') {
+                            buildings.push({
+                            buildingId: type,
+                            level: parseInt(levelMatch[1]),
+                            name: rawType,
+                            position: bMatch[1]
+                        });
+                    }
+                }
+             }
+
+             // --- LOGICA DE CONSTRUÇÃO ---
+             // Procura scripts contendo "endUpgrade" ou contadores
+             // Exemplo de script no HTML: var serverTime = 171545...; ... endUpgrade(1234567890);
+             // O Ikariam geralmente coloca timers em scripts inline
+             
+             try {
+                // Procura por blocos de contagem regressiva no HTML
+                // Pattern comum: "endUpgrade":1740049451 ou chamadas de função
+                // Vamos tentar achar o countdown global ou de edificio
+                // Metodo simplificado: Procurar por classes "constructing" no HTML e tentar achar o tempo
+                
+                // Regex para pegar scripts que definem contadores
+                // Exemplo: getCountdown({enddate: 1678999999, currentdate: 1678888888, step: 1});
+                
+                // Fallback: Se não achar no HTML, tentamos achar nos dados do jogo se disponiveis no dataSet
+                
+                // Tenta extrair do dataSet se tiver 'backgroundData' (algumas versões)
+                // Caso contrário, busca no HTML por "enddate" proximo a um building
+                
+                // Vamos usar uma heuristica baseada em "constructionSite" class se existir
+                const constructionRegex = /<div class="constructionSite"[^>]*>.*?<span class="textLabel">Update: (.*?)<\/span>.*?var\s+enddate\s*=\s*(\d+);/s;
+                // Essa regex é complexa e falha facil.
+                
+                // MELHOR: Usar o timestamp do servidor atual e procurar datas futuras nos scripts
+                const now = Date.now() / 1000;
+                
+                // Procura por qualquer timer de construção no HTML
+                // Modelo: "endUpgrade": 1234567890
+                const timerRegex = /"endUpgrade"\s*:\s*(\d+)/g;
+                let tMatch;
+                while ((tMatch = timerRegex.exec(htmlText)) !== null) {
+                    const endTime = parseInt(tMatch[1]) * 1000; // JS usa ms
+                    if (endTime > Date.now()) {
+                        // Achou um timer futuro! Tenta descobrir o edificio associado
+                        // Isso é dificil sem o DOM completo, mas vamos tentar pegar o contexto anterior
+                        const context = htmlText.substring(tMatch.index - 500, tMatch.index);
+                        
+                        // Tenta achar o nome do edificio no contexto
+                        // Procura patterns como: class="building townHall"
+                        const typeMatch = context.match(/class="building\s+(\w+)/);
+                        
+                        if (typeMatch) {
+                            const rawType = typeMatch[1];
+                            const type = BUILDING_MAP[rawType] || rawType;
+                            
+                            // Achar o nivel alvo no contexto "level15" ou "value":15
+                            const levelMatch = context.match(/level(\d+)/) || context.match(/"level"\s*:\s*(\d+)/);
+                            const nextLevel = levelMatch ? parseInt(levelMatch[1]) + 1 : 1; // Assume upgrade
+
+                            constructionQueue.push({
+                                buildingId: type,
+                                name: rawType, // Nome tecnico, o UI traduz pelo ID
+                                level: nextLevel,
+                                startTime: Date.now(), // Estimado
+                                endTime: endTime
+                            });
+                        }
+                    }
+                }
+
+             } catch(e) {
+                 console.log("Erro parsing construção", e);
+             }
+
+        } else if (unsafeWindow.ikariam && unsafeWindow.ikariam.getScreen()) {
+            // Se estiver na tela ativa (sem HTML text)
              const screen = unsafeWindow.ikariam.getScreen();
              if (screen.data && screen.data.position) {
                 buildings = screen.data.position.map(pos => {
@@ -156,20 +232,48 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
                     };
                 }).filter(b => b !== null);
              }
-        } 
-        
-        // Se estamos processando dados de background, 'unsafeWindow' não ajuda. 
-        // O 'dataSet' passado aqui foi extraído via Regex do HTML.
-        // Infelizmente, a lista de edifícios nem sempre está no dataSetForView JSON puro.
-        // Ela costuma estar em outro script: "updateBackgroundData" ou no HTML direto.
-        // Para simplificar a V4, vamos focar em garantir RECURSOS em background (o mais importante para logistica)
-        // e manter edifícios se já existirem no cache, ou tentar um parse básico.
+             
+             // Tenta pegar construções da tela ativa
+             // O objeto ikariam.model geralmente tem info
+             // Ou procura no DOM elements com classe .constructionSite
+             const sites = document.querySelectorAll('.constructionSite, .upgrading');
+             sites.forEach(site => {
+                 // Tenta extrair info do DOM
+                 // Isso é fragil mas funciona na view ativa
+                 try {
+                     const container = site.closest('li.building');
+                     if(container) {
+                         const classList = container.className;
+                         const typeMatch = classList.match(/^(\w+)\s/);
+                         const rawType = typeMatch ? typeMatch[1] : 'unknown';
+                         const type = BUILDING_MAP[rawType] || rawType;
+                         
+                         // Tenta achar script de timer dentro
+                         const scripts = container.innerHTML;
+                         const timeMatch = scripts.match(/"endUpgrade"\s*:\s*(\d+)/);
+                         
+                         if (timeMatch) {
+                             constructionQueue.push({
+                                 buildingId: type,
+                                 name: rawType,
+                                 level: 0, // Dificil pegar nivel alvo do DOM facil
+                                 startTime: Date.now(),
+                                 endTime: parseInt(timeMatch[1]) * 1000
+                             });
+                         }
+                     }
+                 } catch(e){}
+             });
+        }
         
         // Atualiza objeto da cidade
         const existingCity = empireStore[cityId] || {};
-        
-        // Se não conseguimos ler edifícios (background), mantemos os antigos
         const finalBuildings = buildings.length > 0 ? buildings : (existingCity.buildings || []);
+        
+        // Se achou fila nova, usa. Se não, mantem a antiga APENAS se ainda for válida (data futura)
+        // Se a fila antiga já expirou, limpa.
+        let finalQueue = constructionQueue.length > 0 ? constructionQueue : (existingCity.constructionQueue || []);
+        finalQueue = finalQueue.filter(q => q.endTime > Date.now()); // Remove expired
 
         empireStore[cityId] = {
             id: cityId,
@@ -178,6 +282,7 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
             islandId: dataSet.viewParams.islandId,
             resources: resources,
             buildings: finalBuildings,
+            constructionQueue: finalQueue,
             updatedAt: Date.now()
         };
 
@@ -189,7 +294,8 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
         try {
             const dataSet = unsafeWindow.dataSetForView;
             const empire = getStoredEmpire();
-            const updatedEmpire = extractDataFromDataSet(dataSet, empire);
+            // Passamos null no HTMLText pois estamos lendo a janela ativa (unsafeWindow)
+            const updatedEmpire = extractDataFromDataSet(dataSet, null, empire);
             saveEmpire(updatedEmpire);
         } catch (e) {
             console.error('Ikariam Booster: Erro ao ler dados passivos', e);
@@ -203,7 +309,6 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
         if(btn) btn.disabled = true;
 
         try {
-            // Pega lista de cidades do modelo global
             const cityList = unsafeWindow.ikariam.model.relatedCityData;
             const cityIds = Object.keys(cityList).filter(k => k.startsWith('city_')).map(k => cityList[k].id);
             
@@ -214,15 +319,12 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
                 count++;
                 if(btn) btn.innerHTML = '⏳ Lendo ' + count + '/' + cityIds.length + '...';
                 
-                // Delay aleatório para evitar detecção (800ms a 1500ms)
                 const delay = Math.floor(Math.random() * 700) + 800;
                 await new Promise(r => setTimeout(r, delay));
 
-                // Fetch HTML da cidade
                 const response = await fetch('/index.php?view=city&cityId=' + cityId);
                 const htmlText = await response.text();
 
-                // Extrair dataSetForView usando Regex
                 const regex = /window\.dataSetForView\s*=\s*(\{.*?\});/s;
                 const match = htmlText.match(regex);
 
@@ -230,44 +332,8 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
                     const jsonStr = match[1];
                     try {
                         const backgroundDataSet = JSON.parse(jsonStr);
-                        empire = extractDataFromDataSet(backgroundDataSet, empire);
-                        
-                        // Parse extra de edifícios via HTML (Regex simples nos tooltips ou areas)
-                        // Procura patterns como: area title="Câmara Municipal Nível 25"
-                        // Nota: Isso é um fallback básico.
-                        // <li id="position1" class="townHall building matching_building level25 ...">
-                        const buildingRegex = /<li\s+id="position(\d+)"\s+class="([^"]*?building[^"]*?)"/g;
-                        let bMatch;
-                        const backgroundBuildings = [];
-                        
-                        while ((bMatch = buildingRegex.exec(htmlText)) !== null) {
-                            const pos = bMatch[1];
-                            const classes = bMatch[2];
-                            
-                            // Extrair tipo e nível das classes
-                            // Ex: "townHall building matching_building level25"
-                            const typeMatch = classes.match(/^(\w+)\s/);
-                            const levelMatch = classes.match(/level(\d+)/);
-                            
-                            if (typeMatch && levelMatch) {
-                                const rawType = typeMatch[1];
-                                const type = BUILDING_MAP[rawType] || rawType;
-                                // Ignore 'buildingGround' (terreno vazio)
-                                if (rawType !== 'buildingGround' && rawType !== 'constructionSite') {
-                                     backgroundBuildings.push({
-                                        buildingId: type,
-                                        level: parseInt(levelMatch[1]),
-                                        name: rawType, // Nome exato é dificil sem o title, usa o ID
-                                        position: pos
-                                    });
-                                }
-                            }
-                        }
-                        
-                        if (backgroundBuildings.length > 0) {
-                            empire[cityId].buildings = backgroundBuildings;
-                        }
-
+                        // Passamos o HTML completo para regex de construção
+                        empire = extractDataFromDataSet(backgroundDataSet, htmlText, empire);
                     } catch (parseErr) {
                         console.error("Erro parsing JSON background", parseErr);
                     }
@@ -344,19 +410,17 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
         container.style.display = 'flex';
         container.style.gap = '10px';
 
-        // Botão de Scan
         const btnScan = document.createElement('button');
         btnScan.id = SCAN_BUTTON_ID;
         btnScan.innerHTML = '🔄 Escanear Tudo';
         btnScan.onclick = scanAllCities;
-        styleBtn(btnScan, '#2563EB'); // Blue
+        styleBtn(btnScan, '#2563EB'); 
 
-        // Botão de Enviar
         const btnSync = document.createElement('button');
         btnSync.id = SYNC_BUTTON_ID;
         btnSync.innerHTML = '⚡ Enviar';
         btnSync.onclick = sendData;
-        styleBtn(btnSync, '#8B4513'); // Brown
+        styleBtn(btnSync, '#8B4513');
 
         container.appendChild(btnScan);
         container.appendChild(btnSync);
@@ -381,13 +445,11 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
         btn.style.transition = 'transform 0.1s';
     }
 
-    // Inicialização
     setTimeout(() => {
         parseCurrentView();
         createUI();
     }, 1000);
 
-    // Interceptor AJAX (mantido para navegação manual fluida)
     const originalOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function() {
         this.addEventListener('load', function() {
@@ -407,45 +469,27 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
       <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-        
-        <div 
-          className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" 
-          onClick={onClose}
-        ></div>
-
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={onClose}></div>
         <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-
         <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-3xl sm:w-full">
           <div className="bg-emerald-800 px-4 py-3 flex justify-between items-center text-white">
             <h3 className="text-lg font-medium flex items-center gap-2">
-              <Download className="w-5 h-5" /> Instalar Script Tampermonkey v4 (Auto-Scan)
+              <Download className="w-5 h-5" /> Instalar Script v4.1 (Auto-Scan + Construções)
             </h3>
             <button onClick={onClose} className="text-emerald-200 hover:text-white">
               <X className="w-5 h-5" />
             </button>
           </div>
-
           <div className="p-6">
             <div className="mb-6">
-              <h4 className="text-stone-800 font-semibold mb-2">Instruções de Atualização v4.0:</h4>
-              <ol className="list-decimal list-inside text-sm text-stone-600 space-y-2">
-                <li>Abra o painel do <strong>Tampermonkey</strong> e edite o script antigo.</li>
-                <li>Substitua <strong>todo</strong> o código pelo novo código abaixo (v4.0).</li>
-                <li>Salve (Ctrl+S) e recarregue o Ikariam.</li>
-                <li><strong>Novidade:</strong> Agora aparecerá um botão azul <strong>"🔄 Escanear Tudo"</strong>.</li>
-                <li>Ao clicar nele, o script visitará silenciosamente todas as suas cidades em segundo plano para atualizar os dados de uma vez só!</li>
-              </ol>
+              <h4 className="text-stone-800 font-semibold mb-2">Novidades v4.1:</h4>
+              <p className="text-sm text-stone-600 mb-2">Agora o script identifica automaticamente as construções em andamento e seus tempos de término ao clicar em "Escanear Tudo".</p>
             </div>
-
             <div className="relative">
               <div className="absolute top-2 right-2">
                 <button
                   onClick={handleCopy}
-                  className={`flex items-center gap-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                    copied 
-                      ? 'bg-green-100 text-green-700 border border-green-200' 
-                      : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-50'
-                  }`}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${copied ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-50'}`}
                 >
                   {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                   {copied ? 'Copiado!' : 'Copiar Código'}
@@ -455,23 +499,6 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
                 <code>{scriptCode}</code>
               </pre>
             </div>
-            
-            <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-md text-xs text-blue-800 flex items-start gap-2">
-              <span className="font-bold text-lg leading-none">i</span>
-              <p>
-                <strong>Nota sobre segurança:</strong> O modo "Escanear Tudo" adiciona um pequeno atraso aleatório entre cada cidade para simular um humano e evitar bloqueios do jogo. O processo pode levar alguns segundos.
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-stone-50 px-4 py-3 sm:px-6 flex justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex justify-center rounded-md border border-stone-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-stone-700 hover:bg-stone-50 focus:outline-none sm:text-sm"
-            >
-              Fechar
-            </button>
           </div>
         </div>
       </div>

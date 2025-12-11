@@ -20,6 +20,15 @@ export const MOCK_EMPIRE_DATA: EmpireCity[] = [
       { buildingId: "tavern", level: 15, name: "Taberna" },
       { buildingId: "palace", level: 5, name: "Palácio" }
     ],
+    constructionQueue: [
+        {
+            buildingId: "town_hall",
+            name: "Câmara Municipal",
+            level: 26,
+            startTime: Date.now() - 100000,
+            endTime: Date.now() + 3600000 // Ends in 1 hour
+        }
+    ],
     updatedAt: Date.now()
   },
   {
@@ -37,6 +46,22 @@ export const MOCK_EMPIRE_DATA: EmpireCity[] = [
       { buildingId: "warehouse", level: 25, name: "Armazém" },
       { buildingId: "wine_grower", level: 18, name: "Viticultor" },
       { buildingId: "tavern", level: 20, name: "Taberna" }
+    ],
+    constructionQueue: [
+        {
+            buildingId: "tavern",
+            name: "Taberna",
+            level: 21,
+            startTime: Date.now() - 50000,
+            endTime: Date.now() + 1800000 // Ends in 30 mins
+        },
+        {
+            buildingId: "wine_grower",
+            name: "Viticultor",
+            level: 19,
+            startTime: Date.now(),
+            endTime: Date.now() + 7200000 // Ends in 2 hours
+        }
     ],
     updatedAt: Date.now()
   },

@@ -59,6 +59,14 @@ export interface Building {
 
 // --- Empire Manager Structures ---
 
+export interface ActiveConstruction {
+  buildingId: string;
+  name: string;
+  level: number;
+  startTime: number;
+  endTime: number; // Timestamp when it finishes
+}
+
 export interface EmpireBuilding {
   buildingId: string;
   level: number;
@@ -83,6 +91,7 @@ export interface EmpireCity {
     [key in ResourceType]?: CityProduction;
   };
   buildings: EmpireBuilding[];
+  constructionQueue?: ActiveConstruction[];
   researchPoints?: number;
   updatedAt: number;
 }
