@@ -14,10 +14,10 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
   const appUrl = window.location.origin;
 
   const scriptCode = `// ==UserScript==
-// @name         Ikariam Empire Connector v4.7 (Owner Only Scan)
+// @name         Ikariam Empire Connector v4.8 (Robust Scan)
 // @namespace    http://tampermonkey.net/
-// @version      4.7
-// @description  Filtra apenas cidades próprias, ignorando ocupações e cidades estrangeiras.
+// @version      4.8
+// @description  Filtro aprimorado para cidades próprias e extração de dados resiliente.
 // @author       Ikariam Booster
 // @match        https://*.ikariam.gameforge.com/*
 // @grant        unsafeWindow
@@ -29,7 +29,7 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
     'use strict';
 
     const APP_URL = "${appUrl}";
-    const STORAGE_KEY = 'ikariam_booster_empire_storage_v47';
+    const STORAGE_KEY = 'ikariam_booster_empire_storage_v48';
     const SYNC_BUTTON_ID = 'ikariam-booster-sync-btn';
     const SCAN_BUTTON_ID = 'ikariam-booster-scan-btn';
 
@@ -67,24 +67,26 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
     }
 
     function extractData(dataSet, htmlText, empireStore, cityId) {
-        if (!dataSet || !dataSet.currentResources) return empireStore;
+        if (!dataSet || !dataSet.currentResources) {
+            console.warn("Ikariam Booster: DataSet incompleto para a cidade " + cityId);
+            return empireStore;
+        }
 
-        let cityName = "Cidade " + cityId;
-        let coords = "[?:?]";
+        const cityList = unsafeWindow.ikariam.model.relatedCityData;
+        const cityInfo = cityList['city_' + cityId] || Object.values(cityList).find(c => c.id == cityId);
         
-        try {
-            const cityList = unsafeWindow.ikariam.model.relatedCityData;
-            const cityInfo = cityList['city_' + cityId] || Object.values(cityList).find(c => c.id == cityId);
-            if (cityInfo) {
-                // VERIFICAÇÃO DE PROPRIEDADE: Ignora se não for cidade própria
-                if (cityInfo.relationship !== 'ownCity') {
-                    console.log("Ikariam Booster: Ignorando cidade estrangeira/ocupada: " + cityInfo.name);
-                    return empireStore;
-                }
-                cityName = cityInfo.name;
-                coords = cityInfo.coords;
+        // Se cityInfo existe, validamos se é própria. Se não existe na lista global (raro), tentamos prosseguir.
+        if (cityInfo) {
+            const rel = cityInfo.relationship;
+            // 'ownCity' é o padrão, mas alguns servidores usam 0 ou outros códigos
+            if (rel !== 'ownCity' && rel !== 0 && rel !== "0") {
+                console.log("Ikariam Booster: Ignorando cidade ocupada/estrangeira: " + cityInfo.name);
+                return empireStore;
             }
-        } catch (e) {}
+        }
+
+        const cityName = cityInfo ? cityInfo.name : (dataSet.backgroundView ? dataSet.backgroundView.name : "Cidade " + cityId);
+        const coords = cityInfo ? cityInfo.coords : "[?:?]";
 
         const resources = {};
         const setRes = (id, keyName, prodVal) => {
@@ -172,17 +174,34 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
 
     async function scanAllCities() {
         const btn = document.getElementById(SCAN_BUTTON_ID);
-        if(btn) btn.disabled = true;
+        if(btn) {
+            btn.disabled = true;
+            btn.style.backgroundColor = '#666';
+        }
 
         try {
-            const cityList = unsafeWindow.ikariam.model.relatedCityData;
-            
-            // FILTRO: Pega apenas IDs de cidades onde relationship === 'ownCity'
+            const model = unsafeWindow.ikariam.model;
+            if (!model || !model.relatedCityData) {
+                alert("Erro: O jogo ainda não carregou os dados das cidades. Recarregue a página.");
+                return;
+            }
+
+            const cityList = model.relatedCityData;
             const myOwnedCityIds = Object.keys(cityList)
-                .filter(k => k.startsWith('city_') && cityList[k].relationship === 'ownCity')
+                .filter(k => {
+                    const city = cityList[k];
+                    // Aceita 'ownCity' ou 0 como relação de propriedade
+                    return k.startsWith('city_') && (city.relationship === 'ownCity' || city.relationship === 0 || city.relationship === "0");
+                })
                 .map(k => cityList[k].id);
             
-            console.log("Ikariam Booster: Detectadas " + myOwnedCityIds.length + " cidades próprias.");
+            if (myOwnedCityIds.length === 0) {
+                console.error("Ikariam Booster: Nenhuma cidade própria encontrada na lista do jogo.", cityList);
+                if(btn) btn.innerHTML = '❌ Sem Cidades Próprias';
+                return;
+            }
+            
+            console.log("Ikariam Booster: Iniciando scan de " + myOwnedCityIds.length + " cidades próprias.");
             
             let empire = {}; 
             let successCount = 0;
@@ -191,46 +210,63 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
                 if(btn) btn.innerHTML = '⏳ ' + (successCount + 1) + '/' + myOwnedCityIds.length;
                 
                 try {
-                    await new Promise(r => setTimeout(r, 700));
-                    const response = await fetch('/index.php?view=city&cityId=' + cityId);
+                    // Delay para evitar detecção de bot / overload
+                    await new Promise(r => setTimeout(r, 900));
+                    
+                    const response = await fetch('/index.php?view=city&cityId=' + cityId + '&backgroundView=city');
                     const htmlText = await response.text();
                     
-                    const regex = /window\\.dataSetForView\\s*=\\s*({.*?});/s;
-                    const match = htmlText.match(regex);
+                    // Regex mais flexível para capturar o JSON
+                    const regex = /window\\.dataSetForView\\s*=\\s*({[\\s\\S]*?});\\s*window/m;
+                    const match = htmlText.match(regex) || htmlText.match(/window\\.dataSetForView\\s*=\\s*({[\\s\\S]*?});/);
 
                     if (match && match[1]) {
-                        const backgroundDataSet = JSON.parse(match[1]);
-                        empire = extractData(backgroundDataSet, htmlText, empire, cityId);
-                        successCount++;
+                        try {
+                            const backgroundDataSet = JSON.parse(match[1]);
+                            empire = extractData(backgroundDataSet, htmlText, empire, cityId);
+                            successCount++;
+                        } catch (parseErr) {
+                            console.error("Erro ao processar JSON da cidade " + cityId, parseErr);
+                        }
+                    } else {
+                        console.error("Ikariam Booster: Não encontrou dataSet no HTML da cidade " + cityId);
                     }
-                } catch (err) { console.error("Erro na cidade " + cityId, err); }
+                } catch (err) {
+                    console.error("Erro de conexão na cidade " + cityId, err);
+                }
             }
 
             if (successCount > 0) {
                 saveEmpire(empire);
-                if(btn) btn.innerHTML = '✅ ' + successCount + ' Cidades!';
+                if(btn) {
+                    btn.innerHTML = '✅ ' + successCount + ' Cidades!';
+                    btn.style.backgroundColor = '#059669';
+                }
             } else {
-                if(btn) btn.innerHTML = '❌ Falha no Scan';
+                if(btn) {
+                    btn.innerHTML = '❌ Falha no Scan';
+                    btn.style.backgroundColor = '#DC2626';
+                }
             }
 
         } catch (e) {
-            console.error("Ikariam Booster: Erro no loop de scan", e);
-            if(btn) btn.innerHTML = '❌ Erro';
+            console.error("Ikariam Booster: Erro crítico no scan", e);
+            if(btn) btn.innerHTML = '❌ Erro Crítico';
         } finally {
             setTimeout(() => {
                 if(btn) btn.disabled = false;
                 updateButtonsUI();
-            }, 2000);
+            }, 3000);
         }
     }
 
     function sendData() {
         const empire = getStoredEmpire();
         const payload = Object.values(empire);
-        if (payload.length === 0) { alert("Nenhum dado encontrado. Escaneie primeiro."); return; }
+        if (payload.length === 0) { alert("Nenhum dado encontrado. Faça o scan primeiro."); return; }
 
         const btn = document.getElementById(SYNC_BUTTON_ID);
-        if(btn) btn.innerHTML = '⏳ Enviando...';
+        if(btn) btn.innerHTML = '⏳ Abrindo App...';
 
         const targetWindow = window.open(APP_URL, 'ikariam_booster_target');
         let attempts = 0;
@@ -240,12 +276,12 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
                 targetWindow.postMessage({ type: 'IKARIAM_EMPIRE_DATA', payload: payload }, '*');
                 if (attempts > 6) {
                     clearInterval(interval);
-                    if(btn) btn.innerHTML = '✅ Enviado!';
+                    if(btn) btn.innerHTML = '✅ Dados Enviados!';
                     setTimeout(() => updateButtonsUI(), 2000);
                 }
             } else {
                 clearInterval(interval);
-                alert("Permita pop-ups!");
+                alert("Habilite pop-ups para enviar os dados!");
                 updateButtonsUI();
             }
         }, 1000);
@@ -258,9 +294,13 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
         if(btnSync) {
             btnSync.innerHTML = '⚡ Enviar para o App (' + count + ')';
             btnSync.style.opacity = count > 0 ? '1' : '0.6';
+            btnSync.style.backgroundColor = '#8B4513';
         }
         const btnScan = document.getElementById(SCAN_BUTTON_ID);
-        if(btnScan) btnScan.innerHTML = '🔄 Escanear Império';
+        if(btnScan) {
+            btnScan.innerHTML = '🔄 Escanear Império';
+            btnScan.style.backgroundColor = '#2563EB';
+        }
     }
 
     function createUI() {
@@ -285,12 +325,12 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
     }
 
     function styleBtn(btn, color) {
-        btn.style.cssText = 'padding:14px 24px;background-color:'+color+';color:#FFF;border:2px solid rgba(255,255,255,0.5);border-radius:14px;cursor:pointer;font-weight:bold;font-size:15px;box-shadow:0 6px 20px rgba(0,0,0,0.4);transition:all 0.2s;text-align:center;min-width:220px;font-family:sans-serif;';
+        btn.style.cssText = 'padding:14px 24px;background-color:'+color+';color:#FFF;border:2px solid rgba(255,255,255,0.5);border-radius:14px;cursor:pointer;font-weight:bold;font-size:15px;box-shadow:0 6px 20px rgba(0,0,0,0.4);transition:all 0.2s;text-align:center;min-width:230px;font-family:sans-serif;outline:none;';
         btn.onmouseover = () => { btn.style.transform = 'scale(1.05)'; btn.style.filter = 'brightness(1.2)'; };
         btn.onmouseout = () => { btn.style.transform = 'scale(1)'; btn.style.filter = 'brightness(1)'; };
     }
 
-    setTimeout(createUI, 3000);
+    setTimeout(createUI, 3500);
 })();`;
 
   const handleCopy = () => {
@@ -305,9 +345,9 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onClick={onClose}></div>
         <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
         <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-3xl sm:w-full">
-          <div className="bg-blue-800 px-4 py-3 flex justify-between items-center text-white">
+          <div className="bg-blue-900 px-4 py-3 flex justify-between items-center text-white">
             <h3 className="text-lg font-medium flex items-center gap-2">
-              <Download className="w-5 h-5" /> Instalar Script v4.7 (Filtro de Cidades)
+              <Download className="w-5 h-5" /> Instalar Script v4.8 (Correção de Scan)
             </h3>
             <button onClick={onClose} className="text-blue-200 hover:text-white">
               <X className="w-5 h-5" />
@@ -316,12 +356,12 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
           <div className="p-6">
             <div className="mb-6 bg-blue-50 border border-blue-100 p-4 rounded-lg">
               <h4 className="text-blue-900 font-bold mb-2 flex items-center gap-2">
-                <Check className="w-4 h-4" /> Solução para Cidades Ocupadas:
+                <Check className="w-4 h-4" /> O que mudou na v4.8:
               </h4>
               <ul className="text-sm text-blue-800 space-y-1 list-disc ml-5">
-                <li><strong>Filtro de Propriedade:</strong> O script agora detecta se a cidade é sua ou ocupada. Cidades ocupadas (vermelhas) são automaticamente ignoradas no scan.</li>
-                <li><strong>Fim da Duplicidade:</strong> Se houver uma cidade sua e uma ocupada com o mesmo nome, o script selecionará apenas a sua.</li>
-                <li><strong>Estabilidade:</strong> O erro de "contador em 0" ocorria porque o scan falhava ao tentar ler dados restritos das ocupações.</li>
+                <li><strong>Filtro de Cidades:</strong> Agora o script identifica corretamente suas cidades mesmo que o jogo use IDs internos diferentes para "Própria".</li>
+                <li><strong>Regex Resiliente:</strong> Melhorada a forma como o script lê os dados do código-fonte do jogo para evitar falhas em conexões lentas.</li>
+                <li><strong>Ignorar Ocupações:</strong> Confirmado o bloqueio automático de cidades vermelhas (ocupadas) que causavam travamento no scan.</li>
               </ul>
             </div>
             
