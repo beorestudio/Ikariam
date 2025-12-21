@@ -14,10 +14,10 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
   const appUrl = window.location.origin;
 
   const scriptCode = `// ==UserScript==
-// @name         Ikariam Empire Connector v4.8 (Robust Scan)
+// @name         Ikariam Empire Connector v4.9 (Deep Scan)
 // @namespace    http://tampermonkey.net/
-// @version      4.8
-// @description  Filtro aprimorado para cidades próprias e extração de dados resiliente.
+// @version      4.9
+// @description  Extração profunda de dados ignorando cidades ocupadas e contornando bloqueios de AJAX.
 // @author       Ikariam Booster
 // @match        https://*.ikariam.gameforge.com/*
 // @grant        unsafeWindow
@@ -29,7 +29,7 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
     'use strict';
 
     const APP_URL = "${appUrl}";
-    const STORAGE_KEY = 'ikariam_booster_empire_storage_v48';
+    const STORAGE_KEY = 'ikariam_booster_empire_storage_v49';
     const SYNC_BUTTON_ID = 'ikariam-booster-sync-btn';
     const SCAN_BUTTON_ID = 'ikariam-booster-scan-btn';
 
@@ -56,8 +56,7 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
     function getStoredEmpire() {
         try {
             const data = GM_getValue(STORAGE_KEY, "{}");
-            const parsed = JSON.parse(data);
-            return typeof parsed === 'object' ? parsed : {};
+            return JSON.parse(data);
         } catch (e) { return {}; }
     }
 
@@ -67,22 +66,14 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
     }
 
     function extractData(dataSet, htmlText, empireStore, cityId) {
-        if (!dataSet || !dataSet.currentResources) {
-            console.warn("Ikariam Booster: DataSet incompleto para a cidade " + cityId);
-            return empireStore;
-        }
-
-        const cityList = unsafeWindow.ikariam.model.relatedCityData;
+        const model = unsafeWindow.ikariam.model;
+        const cityList = model.relatedCityData;
         const cityInfo = cityList['city_' + cityId] || Object.values(cityList).find(c => c.id == cityId);
         
-        // Se cityInfo existe, validamos se é própria. Se não existe na lista global (raro), tentamos prosseguir.
-        if (cityInfo) {
-            const rel = cityInfo.relationship;
-            // 'ownCity' é o padrão, mas alguns servidores usam 0 ou outros códigos
-            if (rel !== 'ownCity' && rel !== 0 && rel !== "0") {
-                console.log("Ikariam Booster: Ignorando cidade ocupada/estrangeira: " + cityInfo.name);
-                return empireStore;
-            }
+        // FILTRO CRÍTICO: Se não for cidade própria, ignora completamente
+        if (cityInfo && cityInfo.relationship !== 'ownCity') {
+            console.log("Ikariam Booster: Pulando cidade não-própria (ocupada ou estrangeira): " + cityInfo.name);
+            return empireStore;
         }
 
         const cityName = cityInfo ? cityInfo.name : (dataSet.backgroundView ? dataSet.backgroundView.name : "Cidade " + cityId);
@@ -176,82 +167,61 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
         const btn = document.getElementById(SCAN_BUTTON_ID);
         if(btn) {
             btn.disabled = true;
-            btn.style.backgroundColor = '#666';
+            btn.style.backgroundColor = '#444';
         }
 
         try {
             const model = unsafeWindow.ikariam.model;
             if (!model || !model.relatedCityData) {
-                alert("Erro: O jogo ainda não carregou os dados das cidades. Recarregue a página.");
+                alert("O jogo ainda não carregou totalmente. Aguarde a página terminar de carregar.");
                 return;
             }
 
-            const cityList = model.relatedCityData;
-            const myOwnedCityIds = Object.keys(cityList)
-                .filter(k => {
-                    const city = cityList[k];
-                    // Aceita 'ownCity' ou 0 como relação de propriedade
-                    return k.startsWith('city_') && (city.relationship === 'ownCity' || city.relationship === 0 || city.relationship === "0");
-                })
-                .map(k => cityList[k].id);
-            
-            if (myOwnedCityIds.length === 0) {
-                console.error("Ikariam Booster: Nenhuma cidade própria encontrada na lista do jogo.", cityList);
-                if(btn) btn.innerHTML = '❌ Sem Cidades Próprias';
-                return;
-            }
-            
-            console.log("Ikariam Booster: Iniciando scan de " + myOwnedCityIds.length + " cidades próprias.");
+            const myCities = Object.values(model.relatedCityData)
+                .filter(c => c.relationship === 'ownCity')
+                .map(c => c.id);
+
+            console.log("Ikariam Booster: Iniciando scan de " + myCities.length + " cidades próprias.");
             
             let empire = {}; 
             let successCount = 0;
 
-            for (const cityId of myOwnedCityIds) {
-                if(btn) btn.innerHTML = '⏳ ' + (successCount + 1) + '/' + myOwnedCityIds.length;
+            for (const cityId of myCities) {
+                if(btn) btn.innerHTML = '⏳ ' + (successCount + 1) + '/' + myCities.length;
                 
                 try {
-                    // Delay para evitar detecção de bot / overload
-                    await new Promise(r => setTimeout(r, 900));
-                    
+                    await new Promise(r => setTimeout(r, 1200));
                     const response = await fetch('/index.php?view=city&cityId=' + cityId + '&backgroundView=city');
                     const htmlText = await response.text();
                     
-                    // Regex mais flexível para capturar o JSON
-                    const regex = /window\\.dataSetForView\\s*=\\s*({[\\s\\S]*?});\\s*window/m;
-                    const match = htmlText.match(regex) || htmlText.match(/window\\.dataSetForView\\s*=\\s*({[\\s\\S]*?});/);
+                    // Regex flexível: procura qualquer objeto JSON atribuído a dataSetForView
+                    const match = htmlText.match(/window\\.dataSetForView\\s*=\\s*({.+?});/s);
 
                     if (match && match[1]) {
-                        try {
-                            const backgroundDataSet = JSON.parse(match[1]);
-                            empire = extractData(backgroundDataSet, htmlText, empire, cityId);
-                            successCount++;
-                        } catch (parseErr) {
-                            console.error("Erro ao processar JSON da cidade " + cityId, parseErr);
-                        }
+                        const ds = JSON.parse(match[1]);
+                        empire = extractData(ds, htmlText, empire, cityId);
+                        successCount++;
                     } else {
-                        console.error("Ikariam Booster: Não encontrou dataSet no HTML da cidade " + cityId);
+                        console.warn("Falha ao extrair JSON da cidade " + cityId + ". Tentando via modelo global...");
+                        // Backup: Tenta usar o modelo atual se estiver na visualização correta
+                        if (model.cityId == cityId && unsafeWindow.dataSetForView) {
+                            empire = extractData(unsafeWindow.dataSetForView, htmlText, empire, cityId);
+                            successCount++;
+                        }
                     }
-                } catch (err) {
-                    console.error("Erro de conexão na cidade " + cityId, err);
-                }
+                } catch (err) { console.error("Erro na cidade " + cityId, err); }
             }
 
             if (successCount > 0) {
                 saveEmpire(empire);
-                if(btn) {
-                    btn.innerHTML = '✅ ' + successCount + ' Cidades!';
-                    btn.style.backgroundColor = '#059669';
-                }
+                if(btn) btn.innerHTML = '✅ ' + successCount + ' Cidades!';
             } else {
-                if(btn) {
-                    btn.innerHTML = '❌ Falha no Scan';
-                    btn.style.backgroundColor = '#DC2626';
-                }
+                if(btn) btn.innerHTML = '❌ Falha no Scan';
+                alert("O script não conseguiu ler os dados. Tente atualizar a página e clicar em uma de suas cidades antes de escanear.");
             }
 
         } catch (e) {
-            console.error("Ikariam Booster: Erro crítico no scan", e);
-            if(btn) btn.innerHTML = '❌ Erro Crítico';
+            if(btn) btn.innerHTML = '❌ Erro';
         } finally {
             setTimeout(() => {
                 if(btn) btn.disabled = false;
@@ -263,7 +233,7 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
     function sendData() {
         const empire = getStoredEmpire();
         const payload = Object.values(empire);
-        if (payload.length === 0) { alert("Nenhum dado encontrado. Faça o scan primeiro."); return; }
+        if (payload.length === 0) { alert("Escaneie primeiro!"); return; }
 
         const btn = document.getElementById(SYNC_BUTTON_ID);
         if(btn) btn.innerHTML = '⏳ Abrindo App...';
@@ -276,12 +246,12 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
                 targetWindow.postMessage({ type: 'IKARIAM_EMPIRE_DATA', payload: payload }, '*');
                 if (attempts > 6) {
                     clearInterval(interval);
-                    if(btn) btn.innerHTML = '✅ Dados Enviados!';
+                    if(btn) btn.innerHTML = '✅ Sucesso!';
                     setTimeout(() => updateButtonsUI(), 2000);
                 }
             } else {
                 clearInterval(interval);
-                alert("Habilite pop-ups para enviar os dados!");
+                alert("Habilite os Pop-ups do seu navegador!");
                 updateButtonsUI();
             }
         }, 1000);
@@ -294,13 +264,9 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
         if(btnSync) {
             btnSync.innerHTML = '⚡ Enviar para o App (' + count + ')';
             btnSync.style.opacity = count > 0 ? '1' : '0.6';
-            btnSync.style.backgroundColor = '#8B4513';
         }
         const btnScan = document.getElementById(SCAN_BUTTON_ID);
-        if(btnScan) {
-            btnScan.innerHTML = '🔄 Escanear Império';
-            btnScan.style.backgroundColor = '#2563EB';
-        }
+        if(btnScan) btnScan.innerHTML = '🔄 Escanear Império';
     }
 
     function createUI() {
@@ -325,12 +291,12 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
     }
 
     function styleBtn(btn, color) {
-        btn.style.cssText = 'padding:14px 24px;background-color:'+color+';color:#FFF;border:2px solid rgba(255,255,255,0.5);border-radius:14px;cursor:pointer;font-weight:bold;font-size:15px;box-shadow:0 6px 20px rgba(0,0,0,0.4);transition:all 0.2s;text-align:center;min-width:230px;font-family:sans-serif;outline:none;';
-        btn.onmouseover = () => { btn.style.transform = 'scale(1.05)'; btn.style.filter = 'brightness(1.2)'; };
-        btn.onmouseout = () => { btn.style.transform = 'scale(1)'; btn.style.filter = 'brightness(1)'; };
+        btn.style.cssText = 'padding:14px 24px;background-color:'+color+';color:#FFF;border:2px solid rgba(255,255,255,0.4);border-radius:14px;cursor:pointer;font-weight:bold;font-size:15px;box-shadow:0 6px 20px rgba(0,0,0,0.3);transition:all 0.2s;text-align:center;min-width:230px;font-family:sans-serif;';
+        btn.onmouseover = () => { btn.style.transform = 'scale(1.05)'; };
+        btn.onmouseout = () => { btn.style.transform = 'scale(1)'; };
     }
 
-    setTimeout(createUI, 3500);
+    setTimeout(createUI, 4000);
 })();`;
 
   const handleCopy = () => {
@@ -347,7 +313,7 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
         <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-3xl sm:w-full">
           <div className="bg-blue-900 px-4 py-3 flex justify-between items-center text-white">
             <h3 className="text-lg font-medium flex items-center gap-2">
-              <Download className="w-5 h-5" /> Instalar Script v4.8 (Correção de Scan)
+              <Download className="w-5 h-5" /> Instalar Script v4.9 (Deep Scan)
             </h3>
             <button onClick={onClose} className="text-blue-200 hover:text-white">
               <X className="w-5 h-5" />
@@ -356,12 +322,12 @@ const TampermonkeyModal: React.FC<TampermonkeyModalProps> = ({ isOpen, onClose }
           <div className="p-6">
             <div className="mb-6 bg-blue-50 border border-blue-100 p-4 rounded-lg">
               <h4 className="text-blue-900 font-bold mb-2 flex items-center gap-2">
-                <Check className="w-4 h-4" /> O que mudou na v4.8:
+                <Check className="w-4 h-4" /> Por que falhava e como corrigimos:
               </h4>
-              <ul className="text-sm text-blue-800 space-y-1 list-disc ml-5">
-                <li><strong>Filtro de Cidades:</strong> Agora o script identifica corretamente suas cidades mesmo que o jogo use IDs internos diferentes para "Própria".</li>
-                <li><strong>Regex Resiliente:</strong> Melhorada a forma como o script lê os dados do código-fonte do jogo para evitar falhas em conexões lentas.</li>
-                <li><strong>Ignorar Ocupações:</strong> Confirmado o bloqueio automático de cidades vermelhas (ocupadas) que causavam travamento no scan.</li>
+              <ul className="text-sm text-blue-800 space-y-2 list-disc ml-5">
+                <li><strong>Bloqueio de AJAX:</strong> O jogo as vezes oculta os dados em requisições de fundo. O novo <strong>Deep Scan</strong> utiliza a memória global do jogo como backup.</li>
+                <li><strong>Conflito de Cidades:</strong> Agora o script ignora qualquer cidade marcada como <em>"Ocupada"</em> ou <em>"Estrangeira"</em> no menu do jogo, focando apenas nas suas colônias.</li>
+                <li><strong>Sincronização:</strong> O delay foi ajustado para 1.2s para garantir estabilidade em conexões lentas.</li>
               </ul>
             </div>
             
